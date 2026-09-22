@@ -15,10 +15,11 @@ applies.
 
 ### One-off work (`cadence:once`): a completion record
 
-One markdown file, written once, at the path in the issue's **Doc** line:
+One markdown file, written once, at the path in the issue's **Doc** line. The path is the
+issue's exact title with spaces as underscores (path-unsafe characters dropped):
 
 ```
-loe/NN-short-name.md
+loe/Make_FAIR_Lab_logo.md
 ```
 
 Copy `loe/TEMPLATE_completion_record.md`, fill it in, open a PR whose description says
@@ -26,10 +27,10 @@ Copy `loe/TEMPLATE_completion_record.md`, fill it in, open a PR whose descriptio
 
 ### Recurring work and standing responsibilities: a living document
 
-The parent issue never closes. Its documentation is a folder:
+The parent issue never closes. Its documentation is a folder named the same way:
 
 ```
-loe/NN-short-name/
+loe/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
   README.md        how the program runs - kept current, edited by ordinary PRs
   2026-10.md       one dated record per recurrence
   2026-11.md
@@ -65,6 +66,7 @@ bin/loe record <issue#> --period 2026-10     write the dated record for a recurr
                                              (finds or creates the recurrence sub-issue)
 bin/loe schedule <issue#> --start 2026-10 --count 12
                                              create 12 recurrence sub-issues with due dates
+bin/loe doc <issue#> --set                   write the Doc path into a new issue's body
 bin/loe check                                lint the loe/ tree
 bin/loe check --pr <PR#>                     verify the PR documents every issue it closes
 ```

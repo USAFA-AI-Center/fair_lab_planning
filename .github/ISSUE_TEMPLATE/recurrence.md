@@ -6,6 +6,6 @@ title: "<parent title>: <YYYY-MM or YYYY-Qn>"
 
 **Parent:** #NN
 **Cycle:**
-**Record:** loe/NN-short-name/<date>.md
+**Record:** loe/Parent_Title_With_Underscores/<date>.md
 
 The PR that adds the record says `Closes #<this issue>` and `Refs #NN`.

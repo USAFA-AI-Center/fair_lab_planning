@@ -7,12 +7,17 @@ Every command reads the issue first and derives everything else from it.
   loe record <issue#> [--period P] [--no-issue]
       Write the documentation file for an issue, fields pre-filled from GitHub.
       A cadence:once issue gets its completion record at its Doc path.
-      A recurring issue gets loe/NN-slug/<period>.md and, unless --no-issue,
+      A recurring issue gets loe/<Title>/<period>.md and, unless --no-issue,
       the recurrence sub-issue for that period is found or created.
 
   loe schedule <issue#> --start <period> --count N
       Create N recurrence sub-issues for a recurring issue, one per period from
       the start, each with a due date on the board. Existing periods are skipped.
+
+  loe doc <issue#> [--set]
+      Print the Doc path an issue should have (its exact title, spaces as
+      underscores, path-unsafe characters dropped; a folder for recurring and
+      standing issues, a .md file otherwise). --set writes it into the body.
 
   loe check [--pr N]
       Without --pr: lint the loe/ tree. With --pr: confirm that every issue the
@@ -70,6 +75,18 @@ def load_issue(n):
     parent = int(m.group(1)) if m else None
     return dict(raw, labels=labels, cadence=cad, driver=driver, doc=doc,
                 record=record, parent=parent)
+
+
+def title_slug(title):
+    """Doc path stem: the exact title, spaces as underscores, path-unsafe characters dropped."""
+    t = re.sub(r'[\\/:*?"<>|]+', " ", title)
+    t = re.sub(r"\s+", "_", t.strip())
+    return re.sub(r"_+", "_", t).strip("_")
+
+
+def doc_path_for(iss):
+    living = iss["cadence"] in ("monthly", "quarterly", "semester", "annual") or iss["cadence"] is None
+    return f"loe/{title_slug(iss['title'])}" + ("/" if living else ".md")
 
 
 def is_living(iss):
@@ -297,6 +314,21 @@ def cmd_record(a):
     print(f"PR description: {closes}Refs #{iss['number']}")
 
 
+def cmd_doc(a):
+    iss = load_issue(a.issue)
+    want = doc_path_for(iss)
+    print(f"#{iss['number']} {iss['title']}\n  Doc: {want}" + ("" if iss["doc"] in (None, want) else f"  (issue says {iss['doc']})"))
+    if a.set and iss["doc"] != want:
+        body = iss["body"] or ""
+        if iss["doc"]:
+            body = body.replace(f"`{iss['doc']}`", f"`{want}`")
+        else:
+            body = re.sub(r"(\*\*Notes:\*\*.*\n)", rf"\1**Doc:** `{want}`\n", body, count=1) \
+                if "**Notes:**" in body else f"**Doc:** `{want}`\n{body}"
+        gh("issue", "edit", str(iss["number"]), "-R", REPO, "--body", body)
+        print("  Doc line written to the issue")
+
+
 def cmd_schedule(a):
     iss = load_issue(a.issue)
     if not is_living(iss):
@@ -368,6 +400,10 @@ def main():
     r.add_argument("--period", help="cycle for a recurring issue (default: the current one)")
     r.add_argument("--no-issue", action="store_true", help="do not find or create the sub-issue")
     r.set_defaults(fn=cmd_record)
+    d = sp.add_parser("doc", help="print the Doc path an issue should have; --set writes it into the body")
+    d.add_argument("issue", type=int)
+    d.add_argument("--set", action="store_true")
+    d.set_defaults(fn=cmd_doc)
     s = sp.add_parser("schedule", help="create N recurrence sub-issues with due dates")
     s.add_argument("issue", type=int)
     s.add_argument("--start", required=True, help="first period, e.g. 2026-10, 2026-Q4, 2026-fall, 2026")
