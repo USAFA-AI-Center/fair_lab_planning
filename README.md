@@ -74,10 +74,29 @@ bin/loe check --pr <PR#>                     verify the PR documents every issue
 Every file comes out with its fields already filled from the issue: number, title, driver,
 cycle, date. The command prints the `Closes` / `Refs` lines to paste into the PR.
 
-`schedule` derives the periods from the issue's `cadence:` label (`2026-10`, `2026-Q4`,
-`2026-fall`, `2026`), makes each sub-issue a child of the parent, puts it on the board as
-Todo with its due date as Target date, and labels it `recurrence`. Periods that already have
-a sub-issue are skipped, so it is safe to re-run with a larger count.
+`schedule` derives the periods from the issue's `cadence:` label (`2026-W40`, `2026-10`,
+`2026-Q4`, `2026-fall`, `2026`), makes each sub-issue a child of the parent, puts it on the board
+as Todo with its due date as Target date, and labels it `recurrence`. Give it `--count N` or
+`--until <period>`. Periods that already have a sub-issue are skipped, so it is safe to re-run.
+With `--files` it also writes `docs/<Title>/<period>.md` for every period, so the whole
+reporting structure for a line of effort lands in one PR.
+
+### Per-issue templates
+
+Each record is rendered from a template, chosen in this order:
+
+1. the file named by a `**Template:**` line in the issue body, if present;
+2. `docs/<Title>/TEMPLATE.md`, if the folder has one;
+3. the generic `docs/TEMPLATE_record.md` (or `docs/TEMPLATE_completion_record.md` for a one-off).
+
+So a driver who wants a specific data-gathering form writes it once as `TEMPLATE.md` in their
+folder, and every generated record uses it. A template is ordinary markdown with these fields:
+`{{title}}`, `{{parent}}`, `{{sub_issue}}`, `{{driver}}`, `{{period}}`, `{{date}}`, `{{issue}}`.
+Keep an `**Issue:** #{{sub_issue}}` line in it; the lint and the PR check rely on that line.
+
+Every generated file carries an `unfilled` marker on its second line. Delete it when the record
+is written. The lint fails if an issue is closed while its record still carries the marker, which
+catches "closed the issue, never wrote the report."
 
 The `check` workflow runs on every pull request. A PR that says `Closes #NN` without adding
 the file at that issue's Doc path fails the check.
@@ -85,7 +104,7 @@ the file at that issue's Doc path fails the check.
 ## Labels
 
 - `kind:` what type of work it is (exactly one per issue)
-- `cadence:` one-off, or how often it recurs
+- `cadence:` one-off, or how often it recurs (weekly, monthly, quarterly, semester, annual)
 - `area:` the shared thing it depends on: website, b200, fair-llm, drone
 - `partner:` the outside party that has to show up
 - `needs-scope` no definition of done yet; `needs-external-help`; `blocked`; `faculty-lecture`

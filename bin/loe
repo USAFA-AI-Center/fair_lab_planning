@@ -10,9 +10,23 @@ Every command reads the issue first and derives everything else from it.
       A recurring issue gets docs/<Title>/<period>.md and, unless --no-issue,
       the recurrence sub-issue for that period is found or created.
 
-  loe schedule <issue#> --start <period> --count N
-      Create N recurrence sub-issues for a recurring issue, one per period from
+  loe schedule <issue#> --start <period> (--count N | --until <period>) [--files]
+      Create recurrence sub-issues for a recurring issue, one per period from
       the start, each with a due date on the board. Existing periods are skipped.
+      With --files, also write docs/<Title>/<period>.md for each period from the
+      issue's template, so the whole reporting structure lands in one PR.
+
+  Templates: an issue's records are rendered from, in order, the file named by a
+  **Template:** line in its body, else docs/<Title>/TEMPLATE.md if it exists,
+  else the generic docs/TEMPLATE_record.md (or TEMPLATE_completion_record.md
+  for a one-off). Fields: {{title}} {{parent}} {{sub_issue}} {{driver}}
+  {{period}} {{date}} {{issue}}. Every generated file carries an "unfilled"
+  marker line; delete it when the record is written. The lint fails if a
+  closed issue's record still carries it.
+
+  Periods by cadence: weekly 2026-W40 (due Sunday), monthly 2026-10, quarterly
+  2026-Q4, semester 2026-fall (due Dec 15) / 2027-spring (due May 15),
+  annual 2026. All others are due on the period's last day.
 
   loe doc <issue#> [--set]
       Print the Doc path an issue should have (its exact title, spaces as
@@ -40,6 +54,9 @@ REPO = f"{ORG}/fair_lab_planning"
 PROJECT = "3"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RECURRENCE_LABEL = "recurrence"
+RECURRING = ("weekly", "monthly", "quarterly", "semester", "annual")
+UNFILLED = "<!-- unfilled: delete this line when the record is written -->"
+MAX_PERIODS = 520
 
 # Due day inside a period. Monthly, quarterly and annual periods are due on
 # their last day; semesters are due on a fixed day near the end of classes.
@@ -73,8 +90,10 @@ def load_issue(n):
     record = m.group(1).strip() if m else None
     m = re.search(r"\*\*Parent:\*\*\s*#(\d+)", body)
     parent = int(m.group(1)) if m else None
+    m = re.search(r"\*\*Template:\*\*\s*`([^`]+)`", body)
+    template = m.group(1).strip() if m else None
     return dict(raw, labels=labels, cadence=cad, driver=driver, doc=doc,
-                record=record, parent=parent)
+                record=record, parent=parent, template=template)
 
 
 def title_slug(title):
@@ -85,7 +104,7 @@ def title_slug(title):
 
 
 def doc_path_for(iss):
-    living = iss["cadence"] in ("monthly", "quarterly", "semester", "annual") or iss["cadence"] is None
+    living = iss["cadence"] in RECURRING or iss["cadence"] is None
     return f"docs/{title_slug(iss['title'])}" + ("/" if living else ".md")
 
 
@@ -102,6 +121,9 @@ def slug_dir(iss):
 # ----------------------------------------------------------------------- periods
 def default_period(cad, today=None):
     d = today or dt.date.today()
+    if cad == "weekly":
+        y, w, _ = d.isocalendar()
+        return f"{y}-W{w:02d}"
     if cad == "monthly":
         return f"{d.year}-{d.month:02d}"
     if cad == "quarterly":
@@ -115,18 +137,25 @@ def default_period(cad, today=None):
 
 def parse_period(cad, p):
     """Return (year, index) for the cadence, or exit with the expected format."""
-    fmt = {"monthly": r"^(\d{4})-(\d{2})$", "quarterly": r"^(\d{4})-Q([1-4])$",
+    fmt = {"weekly": r"^(\d{4})-W(\d{2})$",
+           "monthly": r"^(\d{4})-(\d{2})$", "quarterly": r"^(\d{4})-Q([1-4])$",
            "semester": r"^(\d{4})-(fall|spring)$", "annual": r"^(\d{4})$"}
     if cad not in fmt:
         sys.exit(f"cadence {cad!r} is not recurring; schedule only works on "
-                 "monthly, quarterly, semester, or annual issues.")
+                 f"{', '.join(RECURRING)} issues.")
     m = re.match(fmt[cad], p)
     if not m:
-        example = {"monthly": "2026-10", "quarterly": "2026-Q4",
+        example = {"weekly": "2026-W40", "monthly": "2026-10", "quarterly": "2026-Q4",
                    "semester": "2026-fall", "annual": "2026"}[cad]
         sys.exit(f"period {p!r} does not match the {cad} format, e.g. {example}")
     y = int(m.group(1))
-    if cad == "monthly":
+    if cad == "weekly":
+        i = int(m.group(2))
+        try:
+            dt.date.fromisocalendar(y, i, 1)
+        except ValueError:
+            sys.exit(f"{y} has no ISO week {i}")
+    elif cad == "monthly":
         i = int(m.group(2))
         if not 1 <= i <= 12:
             sys.exit(f"month {i} out of range")
@@ -140,6 +169,8 @@ def parse_period(cad, p):
 
 
 def format_period(cad, y, i):
+    if cad == "weekly":
+        return f"{y}-W{i:02d}"
     if cad == "monthly":
         return f"{y}-{i:02d}"
     if cad == "quarterly":
@@ -150,6 +181,9 @@ def format_period(cad, y, i):
 
 
 def next_period(cad, y, i):
+    if cad == "weekly":
+        ny, nw, _ = (dt.date.fromisocalendar(y, i, 1) + dt.timedelta(days=7)).isocalendar()
+        return ny, nw
     if cad == "monthly":
         return (y + 1, 1) if i == 12 else (y, i + 1)
     if cad == "quarterly":
@@ -159,17 +193,26 @@ def next_period(cad, y, i):
     return y + 1, 0
 
 
-def period_sequence(cad, start, count):
+def period_sequence(cad, start, count=None, until=None):
     y, i = parse_period(cad, start)
+    if until:
+        parse_period(cad, until)
     out = []
-    for _ in range(count):
-        out.append(format_period(cad, y, i))
+    while True:
+        p = format_period(cad, y, i)
+        out.append(p)
+        if (count and len(out) >= count) or (until and p == until):
+            return out
+        if len(out) >= MAX_PERIODS:
+            sys.exit(f"--until {until} was not reached within {MAX_PERIODS} periods of {start}; "
+                     "is it before the start?")
         y, i = next_period(cad, y, i)
-    return out
 
 
 def due_date(cad, p):
     y, i = parse_period(cad, p)
+    if cad == "weekly":
+        return dt.date.fromisocalendar(y, i, 7)
     if cad == "monthly":
         return dt.date(y, i, calendar.monthrange(y, i)[1])
     if cad == "quarterly":
@@ -253,14 +296,30 @@ def create_sub(parent, period):
 
 
 # --------------------------------------------------------------------- templates
-def render(template_name, **fields):
-    text = (ROOT / "docs" / template_name).read_text()
+def template_for(iss):
+    """The template an issue's records render from. See the module docstring."""
+    if iss["template"]:
+        path = ROOT / iss["template"]
+    elif is_living(iss) and (ROOT / iss["doc"] / "TEMPLATE.md").exists():
+        path = ROOT / iss["doc"] / "TEMPLATE.md"
+    elif is_living(iss):
+        path = ROOT / "docs" / "TEMPLATE_record.md"
+    else:
+        path = ROOT / "docs" / "TEMPLATE_completion_record.md"
+    if not path.exists():
+        sys.exit(f"template {path.relative_to(ROOT)} for #{iss['number']} does not exist")
+    return path
+
+
+def render(template_path, **fields):
+    text = template_path.read_text()
     for k, v in fields.items():
         text = text.replace("{{" + k + "}}", str(v))
     left = re.findall(r"{{(\w+)}}", text)
     if left:
-        sys.exit(f"template {template_name} has unfilled fields: {left}")
-    return text
+        sys.exit(f"template {template_path.relative_to(ROOT)} has unknown fields: {left}")
+    first, _, rest = text.partition("\n")
+    return f"{first}\n{UNFILLED}\n{rest}"
 
 
 def write_new(path, text):
@@ -281,34 +340,35 @@ def cmd_record(a):
         parent = load_issue(iss["parent"])
         m = re.search(r"\*\*Cycle:\*\*\s*(\S+)", iss["body"])
         period = m.group(1) if m else a.period or default_period(parent["cadence"])
-        text = render("TEMPLATE_record.md", title=parent["title"], parent=parent["number"],
-                      sub_issue=iss["number"], driver=parent["driver"], period=period, date=today)
+        text = render(template_for(parent), title=parent["title"], parent=parent["number"],
+                      sub_issue=iss["number"], driver=parent["driver"], period=period, date=today,
+                      issue=iss["number"])
         write_new(ROOT / iss["record"], text)
         print(f"PR description: Closes #{iss['number']}  Refs #{parent['number']}")
         return
 
     if not is_living(iss):
-        text = render("TEMPLATE_completion_record.md", title=iss["title"], issue=iss["number"],
-                      driver=iss["driver"], date=today)
+        text = render(template_for(iss), title=iss["title"], issue=iss["number"],
+                      driver=iss["driver"], date=today, parent="", sub_issue="", period="")
         write_new(slug_dir(iss), text)
         print(f"PR description: Closes #{iss['number']}")
         return
 
     cad = iss["cadence"]
     period = a.period or default_period(cad)
-    if cad in ("monthly", "quarterly", "semester", "annual"):
+    if cad in RECURRING:
         parse_period(cad, period)
     sub = None
-    if not a.no_issue and cad in ("monthly", "quarterly", "semester", "annual"):
+    if not a.no_issue and cad in RECURRING:
         sub = find_sub(iss, period)
         if sub is None:
             sub = create_sub(iss, period)
             print(f"created sub-issue #{sub['number']} {sub['title']} (due {sub['due']})")
         else:
             print(f"using existing sub-issue #{sub['number']}")
-    text = render("TEMPLATE_record.md", title=iss["title"], parent=iss["number"],
+    text = render(template_for(iss), title=iss["title"], parent=iss["number"],
                   sub_issue=sub["number"] if sub else "<sub-issue>", driver=iss["driver"],
-                  period=period, date=today)
+                  period=period, date=today, issue=sub["number"] if sub else "<sub-issue>")
     write_new(slug_dir(iss) / f"{period}.md", text)
     closes = f"Closes #{sub['number']}  " if sub else ""
     print(f"PR description: {closes}Refs #{iss['number']}")
@@ -333,29 +393,55 @@ def cmd_schedule(a):
     iss = load_issue(a.issue)
     if not is_living(iss):
         sys.exit(f"#{iss['number']} is not a living document (its Doc is a file, not a folder).")
-    periods = period_sequence(iss["cadence"], a.start, a.count)
-    print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods")
+    periods = period_sequence(iss["cadence"], a.start, a.count, a.until)
+    tpl = template_for(iss) if a.files else None
+    print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods"
+          + (f", template {tpl.relative_to(ROOT)}" if tpl else ""))
+    today = dt.date.today().isoformat()
     for p in periods:
-        existing = find_sub(iss, p)
-        if existing:
-            print(f"  {p:<12} #{existing['number']:<4} exists")
-            continue
-        sub = create_sub(iss, p)
-        print(f"  {p:<12} #{sub['number']:<4} created, due {sub['due']}")
+        sub = find_sub(iss, p)
+        if sub:
+            note = f"#{sub['number']:<4} exists"
+        else:
+            sub = create_sub(iss, p)
+            note = f"#{sub['number']:<4} created, due {sub['due']}"
+        if tpl:
+            path = ROOT / iss["doc"] / f"{p}.md"
+            if path.exists():
+                note += "; file exists"
+            else:
+                path.write_text(render(tpl, title=iss["title"], parent=iss["number"],
+                                       sub_issue=sub["number"], driver=iss["driver"],
+                                       period=p, date=today, issue=sub["number"]))
+                note += f"; wrote {path.relative_to(ROOT)}"
+        print(f"  {p:<12} {note}")
 
 
 def lint_tree():
-    problems = []
+    problems, unfilled = [], []
+    records = []
     for d in sorted((ROOT / "docs").iterdir()):
         if d.is_dir():
             if not (d / "README.md").exists():
                 problems.append(f"{d.relative_to(ROOT)}/ has no README.md")
-            for f in d.glob("*.md"):
-                if f.name != "README.md" and "**Issue:**" not in f.read_text():
-                    problems.append(f"{f.relative_to(ROOT)} has no **Issue:** line")
+            records += [f for f in d.glob("*.md") if f.name not in ("README.md", "TEMPLATE.md")]
         elif d.suffix == ".md" and not d.name.startswith("TEMPLATE"):
-            if "**Issue:**" not in d.read_text():
-                problems.append(f"{d.relative_to(ROOT)} has no **Issue:** line")
+            records.append(d)
+    for f in records:
+        text = f.read_text()
+        m = re.search(r"\*\*Issue:\*\*\s*#(\d+)", text)
+        if not m:
+            problems.append(f"{f.relative_to(ROOT)} has no **Issue:** #N line")
+        elif UNFILLED in text:
+            unfilled.append((int(m.group(1)), f))
+    if unfilled:
+        nums = sorted({n for n, _ in unfilled})
+        state = {}
+        for n in nums:
+            state[n] = json.loads(gh("issue", "view", str(n), "-R", REPO, "--json", "state"))["state"]
+        for n, f in unfilled:
+            if state[n] == "CLOSED":
+                problems.append(f"#{n} is closed but {f.relative_to(ROOT)} is still unfilled")
     return problems
 
 
@@ -407,7 +493,11 @@ def main():
     s = sp.add_parser("schedule", help="create N recurrence sub-issues with due dates")
     s.add_argument("issue", type=int)
     s.add_argument("--start", required=True, help="first period, e.g. 2026-10, 2026-Q4, 2026-fall, 2026")
-    s.add_argument("--count", type=int, required=True)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--count", type=int, help="number of periods")
+    g.add_argument("--until", help="last period, inclusive")
+    s.add_argument("--files", action="store_true",
+                   help="also write docs/<Title>/<period>.md for each period from the issue's template")
     s.set_defaults(fn=cmd_schedule)
     c = sp.add_parser("check", help="lint the tree; with --pr, verify the PR documents what it closes")
     c.add_argument("--pr", type=int)
