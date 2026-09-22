@@ -1,8 +1,8 @@
-# <Line of effort title>
+# {{title}}
 
-- **Issue:** #NN
-- **Driver:** <name>
-- **Completed:** YYYY-MM-DD
+- **Issue:** #{{issue}}
+- **Driver:** {{driver}}
+- **Completed:** {{date}}
 
 ## What was done
 

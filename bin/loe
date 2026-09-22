@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""loe - helpers for the FAIR Lab planning repo.
+
+The GitHub issues in USAFA-AI-Center/fair_lab_planning are the source of truth.
+Every command reads the issue first and derives everything else from it.
+
+  loe record <issue#> [--period P] [--no-issue]
+      Write the documentation file for an issue, fields pre-filled from GitHub.
+      A cadence:once issue gets its completion record at its Doc path.
+      A recurring issue gets loe/NN-slug/<period>.md and, unless --no-issue,
+      the recurrence sub-issue for that period is found or created.
+
+  loe schedule <issue#> --start <period> --count N
+      Create N recurrence sub-issues for a recurring issue, one per period from
+      the start, each with a due date on the board. Existing periods are skipped.
+
+  loe check [--pr N]
+      Without --pr: lint the loe/ tree. With --pr: confirm that every issue the
+      PR closes gets its documentation file in that PR. Exit 1 on failure.
+
+Needs: python3 (standard library only) and the gh CLI, authenticated.
+"""
+
+import argparse
+import calendar
+import datetime as dt
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+ORG = "USAFA-AI-Center"
+REPO = f"{ORG}/fair_lab_planning"
+PROJECT = "3"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+RECURRENCE_LABEL = "recurrence"
+
+# Due day inside a period. Monthly, quarterly and annual periods are due on
+# their last day; semesters are due on a fixed day near the end of classes.
+SEMESTER_DUE = {"fall": (12, 15), "spring": (5, 15)}
+
+
+# --------------------------------------------------------------------------- gh
+def gh(*args, ok=(0,)):
+    r = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if r.returncode not in ok:
+        sys.exit(f"gh {' '.join(args[:3])} failed:\n{r.stderr.strip()}")
+    return r.stdout
+
+
+def gql(query):
+    return json.loads(gh("api", "graphql", "-f", f"query={query}"))["data"]
+
+
+# ------------------------------------------------------------------------ issues
+def load_issue(n):
+    raw = json.loads(gh("issue", "view", str(n), "-R", REPO,
+                        "--json", "number,title,body,labels,id,url,state"))
+    body = raw["body"] or ""
+    labels = {l["name"] for l in raw["labels"]}
+    cad = next((l.split(":", 1)[1] for l in labels if l.startswith("cadence:")), None)
+    m = re.search(r"\*\*Driver:\*\*\s*(.+)", body)
+    driver = m.group(1).strip().strip("_") if m else ""
+    m = re.search(r"\*\*Doc:\*\*\s*`([^`]+)`", body)
+    doc = m.group(1).strip() if m else None
+    m = re.search(r"\*\*Record:\*\*\s*`?([^`\s]+)`?", body)
+    record = m.group(1).strip() if m else None
+    m = re.search(r"\*\*Parent:\*\*\s*#(\d+)", body)
+    parent = int(m.group(1)) if m else None
+    return dict(raw, labels=labels, cadence=cad, driver=driver, doc=doc,
+                record=record, parent=parent)
+
+
+def is_living(iss):
+    return bool(iss["doc"]) and iss["doc"].endswith("/")
+
+
+def slug_dir(iss):
+    if not iss["doc"]:
+        sys.exit(f"#{iss['number']} has no **Doc:** line in its body; add one first.")
+    return ROOT / iss["doc"]
+
+
+# ----------------------------------------------------------------------- periods
+def default_period(cad, today=None):
+    d = today or dt.date.today()
+    if cad == "monthly":
+        return f"{d.year}-{d.month:02d}"
+    if cad == "quarterly":
+        return f"{d.year}-Q{(d.month - 1) // 3 + 1}"
+    if cad == "semester":
+        return f"{d.year}-{'fall' if d.month >= 7 else 'spring'}"
+    if cad == "annual":
+        return str(d.year)
+    return d.isoformat()
+
+
+def parse_period(cad, p):
+    """Return (year, index) for the cadence, or exit with the expected format."""
+    fmt = {"monthly": r"^(\d{4})-(\d{2})$", "quarterly": r"^(\d{4})-Q([1-4])$",
+           "semester": r"^(\d{4})-(fall|spring)$", "annual": r"^(\d{4})$"}
+    if cad not in fmt:
+        sys.exit(f"cadence {cad!r} is not recurring; schedule only works on "
+                 "monthly, quarterly, semester, or annual issues.")
+    m = re.match(fmt[cad], p)
+    if not m:
+        example = {"monthly": "2026-10", "quarterly": "2026-Q4",
+                   "semester": "2026-fall", "annual": "2026"}[cad]
+        sys.exit(f"period {p!r} does not match the {cad} format, e.g. {example}")
+    y = int(m.group(1))
+    if cad == "monthly":
+        i = int(m.group(2))
+        if not 1 <= i <= 12:
+            sys.exit(f"month {i} out of range")
+    elif cad == "quarterly":
+        i = int(m.group(2))
+    elif cad == "semester":
+        i = 0 if m.group(2) == "spring" else 1
+    else:
+        i = 0
+    return y, i
+
+
+def format_period(cad, y, i):
+    if cad == "monthly":
+        return f"{y}-{i:02d}"
+    if cad == "quarterly":
+        return f"{y}-Q{i}"
+    if cad == "semester":
+        return f"{y}-{'spring' if i == 0 else 'fall'}"
+    return str(y)
+
+
+def next_period(cad, y, i):
+    if cad == "monthly":
+        return (y + 1, 1) if i == 12 else (y, i + 1)
+    if cad == "quarterly":
+        return (y + 1, 1) if i == 4 else (y, i + 1)
+    if cad == "semester":
+        return (y + 1, 0) if i == 1 else (y, 1)
+    return y + 1, 0
+
+
+def period_sequence(cad, start, count):
+    y, i = parse_period(cad, start)
+    out = []
+    for _ in range(count):
+        out.append(format_period(cad, y, i))
+        y, i = next_period(cad, y, i)
+    return out
+
+
+def due_date(cad, p):
+    y, i = parse_period(cad, p)
+    if cad == "monthly":
+        return dt.date(y, i, calendar.monthrange(y, i)[1])
+    if cad == "quarterly":
+        m = i * 3
+        return dt.date(y, m, calendar.monthrange(y, m)[1])
+    if cad == "semester":
+        mm, dd = SEMESTER_DUE["spring" if i == 0 else "fall"]
+        return dt.date(y, mm, dd)
+    return dt.date(y, 12, 31)
+
+
+# ----------------------------------------------------------------------- project
+_project = {}
+
+
+def project():
+    if not _project:
+        pv = json.loads(gh("project", "view", PROJECT, "--owner", ORG, "--format", "json"))
+        fl = json.loads(gh("project", "field-list", PROJECT, "--owner", ORG, "--format", "json"))["fields"]
+        f = {x["name"]: x for x in fl}
+        _project.update(
+            id=pv["id"],
+            status=f["Status"]["id"],
+            todo=next(o["id"] for o in f["Status"]["options"] if o["name"] == "Todo"),
+            due=f["Target date"]["id"],
+        )
+    return _project
+
+
+def add_to_board(url, due):
+    p = project()
+    item = json.loads(gh("project", "item-add", PROJECT, "--owner", ORG, "--url", url,
+                         "--format", "json"))["id"]
+    gh("project", "item-edit", "--project-id", p["id"], "--id", item,
+       "--field-id", p["status"], "--single-select-option-id", p["todo"])
+    if due:
+        gh("project", "item-edit", "--project-id", p["id"], "--id", item,
+           "--field-id", p["due"], "--date", due.isoformat())
+
+
+# -------------------------------------------------------------------- sub-issues
+def sub_title(parent, period):
+    return f"{parent['title']}: {period}"
+
+
+def find_sub(parent, period):
+    title = sub_title(parent, period)
+    hits = json.loads(gh("issue", "list", "-R", REPO, "--state", "all", "--limit", "100",
+                         "--search", f'"{title}" in:title', "--json", "number,title,url"))
+    return next((h for h in hits if h["title"] == title), None)
+
+
+def ensure_label():
+    have = {x["name"] for x in json.loads(gh("label", "list", "-R", REPO, "--json", "name", "--limit", "200"))}
+    if RECURRENCE_LABEL not in have:
+        gh("label", "create", RECURRENCE_LABEL, "-R", REPO, "--color", "bfdadc",
+           "--description", "One cycle of a recurring line of effort")
+
+
+def create_sub(parent, period):
+    cad = parent["cadence"]
+    due = due_date(cad, period)
+    record = f"{parent['doc']}{period}.md"
+    body = "\n".join([
+        f"**Parent:** #{parent['number']}",
+        f"**Cycle:** {period}",
+        f"**Record:** `{record}`",
+        f"**Due:** {due.isoformat()}",
+        "",
+        f"The PR that adds the record says `Closes #<this issue>` and `Refs #{parent['number']}`.",
+        "Generated by `bin/loe`.",
+    ])
+    ensure_label()
+    url = gh("issue", "create", "-R", REPO, "--title", sub_title(parent, period),
+             "--body", body, "--label", RECURRENCE_LABEL).strip()
+    sub = json.loads(gh("issue", "view", url, "--json", "number,id,url"))
+    gql(f'mutation {{ addSubIssue(input:{{issueId:"{parent["id"]}", subIssueId:"{sub["id"]}"}}) '
+        f'{{ issue {{ id }} }} }}')
+    add_to_board(url, due)
+    return dict(sub, title=sub_title(parent, period), due=due)
+
+
+# --------------------------------------------------------------------- templates
+def render(template_name, **fields):
+    text = (ROOT / "loe" / template_name).read_text()
+    for k, v in fields.items():
+        text = text.replace("{{" + k + "}}", str(v))
+    left = re.findall(r"{{(\w+)}}", text)
+    if left:
+        sys.exit(f"template {template_name} has unfilled fields: {left}")
+    return text
+
+
+def write_new(path, text):
+    if path.exists():
+        sys.exit(f"{path.relative_to(ROOT)} already exists; not overwriting.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    print(f"wrote {path.relative_to(ROOT)}")
+
+
+# ---------------------------------------------------------------------- commands
+def cmd_record(a):
+    iss = load_issue(a.issue)
+    today = dt.date.today().isoformat()
+
+    # A recurrence sub-issue: its body names the record path.
+    if iss["record"] and iss["parent"]:
+        parent = load_issue(iss["parent"])
+        m = re.search(r"\*\*Cycle:\*\*\s*(\S+)", iss["body"])
+        period = m.group(1) if m else a.period or default_period(parent["cadence"])
+        text = render("TEMPLATE_record.md", title=parent["title"], parent=parent["number"],
+                      sub_issue=iss["number"], driver=parent["driver"], period=period, date=today)
+        write_new(ROOT / iss["record"], text)
+        print(f"PR description: Closes #{iss['number']}  Refs #{parent['number']}")
+        return
+
+    if not is_living(iss):
+        text = render("TEMPLATE_completion_record.md", title=iss["title"], issue=iss["number"],
+                      driver=iss["driver"], date=today)
+        write_new(slug_dir(iss), text)
+        print(f"PR description: Closes #{iss['number']}")
+        return
+
+    cad = iss["cadence"]
+    period = a.period or default_period(cad)
+    if cad in ("monthly", "quarterly", "semester", "annual"):
+        parse_period(cad, period)
+    sub = None
+    if not a.no_issue and cad in ("monthly", "quarterly", "semester", "annual"):
+        sub = find_sub(iss, period)
+        if sub is None:
+            sub = create_sub(iss, period)
+            print(f"created sub-issue #{sub['number']} {sub['title']} (due {sub['due']})")
+        else:
+            print(f"using existing sub-issue #{sub['number']}")
+    text = render("TEMPLATE_record.md", title=iss["title"], parent=iss["number"],
+                  sub_issue=sub["number"] if sub else "<sub-issue>", driver=iss["driver"],
+                  period=period, date=today)
+    write_new(slug_dir(iss) / f"{period}.md", text)
+    closes = f"Closes #{sub['number']}  " if sub else ""
+    print(f"PR description: {closes}Refs #{iss['number']}")
+
+
+def cmd_schedule(a):
+    iss = load_issue(a.issue)
+    if not is_living(iss):
+        sys.exit(f"#{iss['number']} is not a living document (its Doc is a file, not a folder).")
+    periods = period_sequence(iss["cadence"], a.start, a.count)
+    print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods")
+    for p in periods:
+        existing = find_sub(iss, p)
+        if existing:
+            print(f"  {p:<12} #{existing['number']:<4} exists")
+            continue
+        sub = create_sub(iss, p)
+        print(f"  {p:<12} #{sub['number']:<4} created, due {sub['due']}")
+
+
+def lint_tree():
+    problems = []
+    for d in sorted((ROOT / "loe").iterdir()):
+        if d.is_dir():
+            if not (d / "README.md").exists():
+                problems.append(f"{d.relative_to(ROOT)}/ has no README.md")
+            for f in d.glob("*.md"):
+                if f.name != "README.md" and "**Issue:**" not in f.read_text():
+                    problems.append(f"{f.relative_to(ROOT)} has no **Issue:** line")
+        elif d.suffix == ".md" and not d.name.startswith("TEMPLATE"):
+            if "**Issue:**" not in d.read_text():
+                problems.append(f"{d.relative_to(ROOT)} has no **Issue:** line")
+    return problems
+
+
+def cmd_check(a):
+    problems = lint_tree()
+    if a.pr:
+        pr = json.loads(gh("pr", "view", str(a.pr), "-R", REPO, "--json", "body,files"))
+        files = [f["path"] for f in pr["files"]]
+        closes = {int(n) for n in re.findall(
+            r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", pr["body"] or "")}
+        if not closes:
+            print("PR closes no issue; only the tree lint applies.")
+        for n in sorted(closes):
+            iss = load_issue(n)
+            if iss["record"]:
+                want = [iss["record"]]
+                ok = iss["record"] in files
+            elif iss["doc"] and not is_living(iss):
+                want = [iss["doc"]]
+                ok = iss["doc"] in files
+            elif iss["doc"]:
+                want = [iss["doc"] + "<period>.md"]
+                ok = any(f.startswith(iss["doc"]) and not f.endswith("README.md") for f in files)
+            else:
+                want, ok = ["a **Doc:** line on the issue"], False
+            print(f"  Closes #{n}: {'ok' if ok else 'MISSING'} {want[0]}")
+            if not ok:
+                problems.append(f"PR closes #{n} but does not add {want[0]}")
+    for p in problems:
+        print("FAIL", p)
+    if problems:
+        sys.exit(1)
+    print("check passed")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="loe", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    r = sp.add_parser("record", help="write the documentation file for an issue")
+    r.add_argument("issue", type=int)
+    r.add_argument("--period", help="cycle for a recurring issue (default: the current one)")
+    r.add_argument("--no-issue", action="store_true", help="do not find or create the sub-issue")
+    r.set_defaults(fn=cmd_record)
+    s = sp.add_parser("schedule", help="create N recurrence sub-issues with due dates")
+    s.add_argument("issue", type=int)
+    s.add_argument("--start", required=True, help="first period, e.g. 2026-10, 2026-Q4, 2026-fall, 2026")
+    s.add_argument("--count", type=int, required=True)
+    s.set_defaults(fn=cmd_schedule)
+    c = sp.add_parser("check", help="lint the tree; with --pr, verify the PR documents what it closes")
+    c.add_argument("--pr", type=int)
+    c.set_defaults(fn=cmd_check)
+    a = ap.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()
