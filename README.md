@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/FAIR-Logo-2D-Blue.png" alt="FAIR - Falcon AI Research Lab, United States Air Force Academy" width="520">
+</p>
+
 # FAIR Lab planning
 
 Issues in this repo are the FAIR Lab lines of effort. The board is the org project
@@ -22,8 +26,8 @@ issue's exact title with spaces as underscores (path-unsafe characters dropped):
 docs/Make_FAIR_Lab_logo.md
 ```
 
-Copy `docs/TEMPLATE_completion_record.md`, fill it in, open a PR whose description says
-`Closes #NN`. Merge closes the issue.
+Run `bin/loe record <issue#>` to generate it with the header filled in, write it, open a PR
+whose description says `Closes #NN`. Merge closes the issue.
 
 ### Recurring work and standing responsibilities: a living document
 
@@ -81,18 +85,23 @@ as Todo with its due date as Target date, and labels it `recurrence`. Give it `-
 With `--files` it also writes `docs/<Title>/<period>.md` for every period, so the whole
 reporting structure for a line of effort lands in one PR.
 
-### Per-issue templates
+### Templates live in the issues
 
-Each record is rendered from a template, chosen in this order:
+`docs/` holds data only. The form a record is generated from lives in the issue that owns it,
+as a fenced block under a `## Template` heading in the issue body. A record is rendered from,
+in order:
 
-1. the file named by a `**Template:**` line in the issue body, if present;
-2. `docs/<Title>/TEMPLATE.md`, if the folder has one;
-3. the generic `docs/TEMPLATE_record.md` (or `docs/TEMPLATE_completion_record.md` for a one-off).
+1. the `## Template` block in the issue's own body;
+2. the block in the issue named by a `**Template:** #N` line, so several lines of effort can
+   share one form;
+3. the built-in default in `bin/loe` for a recurring or a one-off issue.
 
-So a driver who wants a specific data-gathering form writes it once as `TEMPLATE.md` in their
-folder, and every generated record uses it. A template is ordinary markdown with these fields:
-`{{title}}`, `{{parent}}`, `{{sub_issue}}`, `{{driver}}`, `{{period}}`, `{{date}}`, `{{issue}}`.
-Keep an `**Issue:** #{{sub_issue}}` line in it; the lint and the PR check rely on that line.
+`bin/loe template <issue#>` shows the effective template and where it came from.
+`bin/loe template <issue#> --set` writes the built-in default into the issue as a `## Template`
+block; the driver then edits it there, and every later record follows it. A template is ordinary
+markdown with these fields: `{{title}}`, `{{parent}}`, `{{sub_issue}}`, `{{driver}}`, `{{period}}`,
+`{{date}}`, `{{issue}}`. Keep an `**Issue:** #{{sub_issue}}` line in it (or `#{{issue}}` for a
+one-off); the lint and the PR check rely on that line.
 
 Every generated file carries an `unfilled` marker on its second line. Delete it when the record
 is written. The lint fails if an issue is closed while its record still carries the marker, which

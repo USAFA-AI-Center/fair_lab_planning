@@ -16,13 +16,19 @@ Every command reads the issue first and derives everything else from it.
       With --files, also write docs/<Title>/<period>.md for each period from the
       issue's template, so the whole reporting structure lands in one PR.
 
-  Templates: an issue's records are rendered from, in order, the file named by a
-  **Template:** line in its body, else docs/<Title>/TEMPLATE.md if it exists,
-  else the generic docs/TEMPLATE_record.md (or TEMPLATE_completion_record.md
-  for a one-off). Fields: {{title}} {{parent}} {{sub_issue}} {{driver}}
-  {{period}} {{date}} {{issue}}. Every generated file carries an "unfilled"
-  marker line; delete it when the record is written. The lint fails if a
-  closed issue's record still carries it.
+  loe template <issue#> [--set [--from FILE]]
+      Show the template an issue's records render from and where it came from.
+      --set writes a "## Template" block into the issue body (the built-in
+      default, or FILE), replacing an existing block, for the driver to edit.
+
+  Templates live in the issues, never in docs/. A record is rendered from, in
+  order: the fenced block under "## Template" in the issue's own body; the block
+  in the issue named by a "**Template:** #N" line (one form shared by several
+  lines of effort); else the built-in default for a recurring or one-off issue.
+  Fields: {{title}} {{parent}} {{sub_issue}} {{driver}} {{period}} {{date}}
+  {{issue}}. Every generated file carries an "unfilled" marker line; delete it
+  when the record is written. The lint fails if a closed issue's record still
+  carries it.
 
   Periods by cadence: weekly 2026-W40 (due Sunday), monthly 2026-10, quarterly
   2026-Q4, semester 2026-fall (due Dec 15) / 2027-spring (due May 15),
@@ -58,6 +64,54 @@ RECURRING = ("weekly", "monthly", "quarterly", "semester", "annual")
 UNFILLED = "<!-- unfilled: delete this line when the record is written -->"
 MAX_PERIODS = 520
 
+DEFAULT_RECORD = """\
+# {{title}}: {{period}}
+
+- **Issue:** #{{sub_issue}} (recurrence of #{{parent}})
+- **Driver:** {{driver}}
+- **Cycle:** {{period}}
+- **Recorded:** {{date}}
+
+## What happened
+
+Two to five sentences.
+
+## Who was involved
+
+Attendees, recipients, or the department engaged.
+
+## What changed as a result
+
+Decisions made, requests received, follow-ups filed (issue numbers).
+
+## Next time
+
+What to do differently in the next cycle.
+"""
+
+DEFAULT_COMPLETION = """\
+# {{title}}
+
+- **Issue:** #{{issue}}
+- **Driver:** {{driver}}
+- **Completed:** {{date}}
+
+## What was done
+
+Two to five sentences. What exists now that did not before.
+
+## Evidence
+
+Links: the deployed thing, the document delivered, the email sent, the repo, the photo.
+Anything a reader can open to confirm the work.
+
+## Follow-ups filed
+
+- #NN <title> (or "none")
+"""
+
+TEMPLATE_BLOCK = re.compile(r"^## Template\s*\n(`{3,})[a-z]*\n(.*?)\n\1[ \t]*$", re.S | re.M)
+
 # Due day inside a period. Monthly, quarterly and annual periods are due on
 # their last day; semesters are due on a fixed day near the end of classes.
 SEMESTER_DUE = {"fall": (12, 15), "spring": (5, 15)}
@@ -90,10 +144,13 @@ def load_issue(n):
     record = m.group(1).strip() if m else None
     m = re.search(r"\*\*Parent:\*\*\s*#(\d+)", body)
     parent = int(m.group(1)) if m else None
-    m = re.search(r"\*\*Template:\*\*\s*`([^`]+)`", body)
-    template = m.group(1).strip() if m else None
+    m = re.search(r"\*\*Template:\*\*\s*#(\d+)", body)
+    template_ref = int(m.group(1)) if m else None
+    m = TEMPLATE_BLOCK.search(body)
+    template_text = m.group(2) + "\n" if m else None
     return dict(raw, labels=labels, cadence=cad, driver=driver, doc=doc,
-                record=record, parent=parent, template=template)
+                record=record, parent=parent, template_ref=template_ref,
+                template_text=template_text)
 
 
 def title_slug(title):
@@ -297,27 +354,27 @@ def create_sub(parent, period):
 
 # --------------------------------------------------------------------- templates
 def template_for(iss):
-    """The template an issue's records render from. See the module docstring."""
-    if iss["template"]:
-        path = ROOT / iss["template"]
-    elif is_living(iss) and (ROOT / iss["doc"] / "TEMPLATE.md").exists():
-        path = ROOT / iss["doc"] / "TEMPLATE.md"
-    elif is_living(iss):
-        path = ROOT / "docs" / "TEMPLATE_record.md"
-    else:
-        path = ROOT / "docs" / "TEMPLATE_completion_record.md"
-    if not path.exists():
-        sys.exit(f"template {path.relative_to(ROOT)} for #{iss['number']} does not exist")
-    return path
+    """(text, source) of the template an issue's records render from."""
+    if iss["template_text"]:
+        return iss["template_text"], f"## Template block in #{iss['number']}"
+    if iss["template_ref"]:
+        other = load_issue(iss["template_ref"])
+        if not other["template_text"]:
+            sys.exit(f"#{iss['number']} says **Template:** #{other['number']}, "
+                     f"but #{other['number']} has no ## Template block")
+        return other["template_text"], f"## Template block in #{other['number']}"
+    if is_living(iss):
+        return DEFAULT_RECORD, "built-in default (recurring)"
+    return DEFAULT_COMPLETION, "built-in default (one-off)"
 
 
-def render(template_path, **fields):
-    text = template_path.read_text()
+def render(template, **fields):
+    text, source = template
     for k, v in fields.items():
         text = text.replace("{{" + k + "}}", str(v))
     left = re.findall(r"{{(\w+)}}", text)
     if left:
-        sys.exit(f"template {template_path.relative_to(ROOT)} has unknown fields: {left}")
+        sys.exit(f"template ({source}) has unknown fields: {left}")
     first, _, rest = text.partition("\n")
     return f"{first}\n{UNFILLED}\n{rest}"
 
@@ -389,6 +446,28 @@ def cmd_doc(a):
         print("  Doc line written to the issue")
 
 
+def cmd_template(a):
+    iss = load_issue(a.issue)
+    if a.set:
+        text = pathlib.Path(a.source).read_text() if a.source else \
+            (DEFAULT_RECORD if is_living(iss) else DEFAULT_COMPLETION)
+        fence = "````" if "```" in text else "```"
+        block = f"## Template\n{fence}markdown\n{text.rstrip()}\n{fence}"
+        body = iss["body"] or ""
+        if TEMPLATE_BLOCK.search(body):
+            body = TEMPLATE_BLOCK.sub(lambda m: block, body, count=1)
+            what = "replaced"
+        else:
+            body = body.rstrip() + "\n\n" + block + "\n"
+            what = "added"
+        gh("issue", "edit", str(iss["number"]), "-R", REPO, "--body", body)
+        print(f"#{iss['number']}: ## Template block {what}")
+        iss = load_issue(a.issue)
+    text, source = template_for(iss)
+    print(f"#{iss['number']} {iss['title']}\n  template source: {source}\n")
+    print(text)
+
+
 def cmd_schedule(a):
     iss = load_issue(a.issue)
     if not is_living(iss):
@@ -396,7 +475,7 @@ def cmd_schedule(a):
     periods = period_sequence(iss["cadence"], a.start, a.count, a.until)
     tpl = template_for(iss) if a.files else None
     print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods"
-          + (f", template {tpl.relative_to(ROOT)}" if tpl else ""))
+          + (f", template: {tpl[1]}" if tpl else ""))
     today = dt.date.today().isoformat()
     for p in periods:
         sub = find_sub(iss, p)
@@ -424,9 +503,16 @@ def lint_tree():
         if d.is_dir():
             if not (d / "README.md").exists():
                 problems.append(f"{d.relative_to(ROOT)}/ has no README.md")
-            records += [f for f in d.glob("*.md") if f.name not in ("README.md", "TEMPLATE.md")]
-        elif d.suffix == ".md" and not d.name.startswith("TEMPLATE"):
-            records.append(d)
+            for f in d.glob("*.md"):
+                if f.name.upper().startswith("TEMPLATE"):
+                    problems.append(f"{f.relative_to(ROOT)}: templates live in the issue body, not docs/")
+                elif f.name != "README.md":
+                    records.append(f)
+        elif d.suffix == ".md":
+            if d.name.upper().startswith("TEMPLATE"):
+                problems.append(f"{d.relative_to(ROOT)}: templates live in the issue body, not docs/")
+            else:
+                records.append(d)
     for f in records:
         text = f.read_text()
         m = re.search(r"\*\*Issue:\*\*\s*#(\d+)", text)
@@ -490,6 +576,11 @@ def main():
     d.add_argument("issue", type=int)
     d.add_argument("--set", action="store_true")
     d.set_defaults(fn=cmd_doc)
+    t = sp.add_parser("template", help="show an issue's template; --set writes a ## Template block into it")
+    t.add_argument("issue", type=int)
+    t.add_argument("--set", action="store_true")
+    t.add_argument("--from", dest="source", help="file whose contents become the block (default: built-in)")
+    t.set_defaults(fn=cmd_template)
     s = sp.add_parser("schedule", help="create N recurrence sub-issues with due dates")
     s.add_argument("issue", type=int)
     s.add_argument("--start", required=True, help="first period, e.g. 2026-10, 2026-Q4, 2026-fall, 2026")
