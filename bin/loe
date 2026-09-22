@@ -4,22 +4,36 @@
 The GitHub issues in USAFA-AI-Center/fair_lab_planning are the source of truth.
 Every command reads the issue first and derives everything else from it.
 
-  loe record <issue#> [--period P] [--no-issue]
-      Write the documentation file for an issue, fields pre-filled from GitHub.
-      A cadence:once issue gets its completion record at its Doc path.
-      A recurring issue gets docs/<Title>/<period>.md and, unless --no-issue,
-      the recurrence sub-issue for that period is found or created.
+  Two commands do the work, and they touch different things:
 
-  loe schedule <issue#> --start <period> (--count N | --until <period>) [--files]
-      Create recurrence sub-issues for a recurring issue, one per period from
-      the start, each with a due date on the board. Existing periods are skipped.
-      With --files, also write docs/<Title>/<period>.md for each period from the
-      issue's template, so the whole reporting structure lands in one PR.
+  loe schedule <issue#> --start <period> (--count N | --until <period>)
+      ISSUES ONLY. Create the recurrence sub-issues for a recurring line of
+      effort, one per period, each a child of the parent with its due date on
+      the board and its record path in the body. Nothing in the repo changes.
+      Existing periods are skipped, so re-running is safe.
+
+  loe record <issue#>
+      ONE FILE ONLY. Start the report for an issue: create a branch from
+      origin/main and write the record file from the issue's template with the
+      header filled in. Give it a recurrence sub-issue (from schedule) or a
+      one-off issue. For a recurring parent, add --period to pick the cycle;
+      that cycle's sub-issue must already exist.
+
+  loe submit [--dry-run]
+      Finish the report: commit the record on the current record/ branch, push
+      it, and open the PR with the Closes / Refs lines filled in. Refuses while
+      the record still carries the unfilled marker.
 
   loe template <issue#> [--set [--from FILE]]
       Show the template an issue's records render from and where it came from.
       --set writes a "## Template" block into the issue body (the built-in
       default, or FILE), replacing an existing block, for the driver to edit.
+
+  Who may act: only an assignee of the issue (for a recurrence, of the
+  sub-issue or its parent) may schedule, record, submit, or set its template,
+  and the PR check fails a PR whose author is not one. The Driver line in the
+  body is prose; the assignee list is the identity GitHub can verify, so
+  assign the driver on GitHub before records are written.
 
   Templates live in the issues, never in docs/. A record is rendered from, in
   order: the fenced block under "## Template" in the issue's own body; the block
@@ -40,8 +54,9 @@ Every command reads the issue first and derives everything else from it.
       standing issues, a .md file otherwise). --set writes it into the body.
 
   loe check [--pr N]
-      Without --pr: lint the docs/ tree. With --pr: confirm that every issue the
-      PR closes gets its documentation file in that PR. Exit 1 on failure.
+      Without --pr: lint the docs/ tree. With --pr: for every issue the PR
+      closes, its record must be in the PR and no longer carry the unfilled
+      marker. Exit 1 on failure.
 
 Needs: python3 (standard library only) and the gh CLI, authenticated.
 """
@@ -58,7 +73,8 @@ import sys
 ORG = "USAFA-AI-Center"
 REPO = f"{ORG}/fair_lab_planning"
 PROJECT = "3"
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import os
+ROOT = pathlib.Path(os.environ.get("LOE_ROOT") or pathlib.Path(__file__).resolve().parent.parent)
 RECURRENCE_LABEL = "recurrence"
 RECURRING = ("weekly", "monthly", "quarterly", "semester", "annual")
 UNFILLED = "<!-- unfilled: delete this line when the record is written -->"
@@ -129,10 +145,17 @@ def gql(query):
     return json.loads(gh("api", "graphql", "-f", f"query={query}"))["data"]
 
 
+def git(*args, ok=(0,)):
+    r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
+    if r.returncode not in ok:
+        sys.exit(f"git {' '.join(args)} failed:\n{r.stderr.strip()}")
+    return r.stdout.strip()
+
+
 # ------------------------------------------------------------------------ issues
 def load_issue(n):
     raw = json.loads(gh("issue", "view", str(n), "-R", REPO,
-                        "--json", "number,title,body,labels,id,url,state"))
+                        "--json", "number,title,body,labels,id,url,state,assignees"))
     body = raw["body"] or ""
     labels = {l["name"] for l in raw["labels"]}
     cad = next((l.split(":", 1)[1] for l in labels if l.startswith("cadence:")), None)
@@ -150,7 +173,36 @@ def load_issue(n):
     template_text = m.group(2) + "\n" if m else None
     return dict(raw, labels=labels, cadence=cad, driver=driver, doc=doc,
                 record=record, parent=parent, template_ref=template_ref,
-                template_text=template_text)
+                template_text=template_text,
+                assignees={x["login"] for x in raw.get("assignees") or []})
+
+
+_me = {}
+
+
+def me():
+    if not _me:
+        _me["login"] = json.loads(gh("api", "user"))["login"]
+    return _me["login"]
+
+
+def owners(iss):
+    """Logins allowed to act on an issue: its assignees, plus its parent's for a recurrence."""
+    who = set(iss["assignees"])
+    if iss["parent"]:
+        who |= load_issue(iss["parent"])["assignees"]
+    return who
+
+
+def require_owner(iss, login=None, action="act on"):
+    login = login or me()
+    allowed = owners(iss)
+    if not allowed:
+        sys.exit(f"#{iss['number']} has no assignee. Assign the driver on GitHub first; "
+                 "only an assignee may " + action + " it.")
+    if login not in allowed:
+        sys.exit(f"@{login} is not an assignee of #{iss['number']} "
+                 f"(assignees: {', '.join('@' + a for a in sorted(allowed))}); only they may {action} it.")
 
 
 def title_slug(title):
@@ -388,47 +440,111 @@ def write_new(path, text):
 
 
 # ---------------------------------------------------------------------- commands
+def start_branch(name):
+    """Create record branch <name> from origin/main, or stay on it if already there."""
+    current = git("rev-parse", "--abbrev-ref", "HEAD")
+    if current == name:
+        return
+    if current.startswith("record/"):
+        sys.exit(f"you are on {current}; finish it with `loe submit` or switch to main first.")
+    git("fetch", "-q", "origin")
+    exists = git("branch", "--list", name)
+    if exists:
+        git("switch", "-q", name)
+    else:
+        git("switch", "-q", "-c", name, "origin/main")
+    print(f"on branch {name}")
+
+
 def cmd_record(a):
     iss = load_issue(a.issue)
     today = dt.date.today().isoformat()
 
-    # A recurrence sub-issue: its body names the record path.
+    # A recurrence sub-issue (made by schedule): its body names the record path.
     if iss["record"] and iss["parent"]:
+        require_owner(iss, action="record")
         parent = load_issue(iss["parent"])
         m = re.search(r"\*\*Cycle:\*\*\s*(\S+)", iss["body"])
-        period = m.group(1) if m else a.period or default_period(parent["cadence"])
+        period = m.group(1) if m else "cycle"
+        start_branch(f"record/{title_slug(parent['title'])}-{period}")
         text = render(template_for(parent), title=parent["title"], parent=parent["number"],
                       sub_issue=iss["number"], driver=parent["driver"], period=period, date=today,
                       issue=iss["number"])
         write_new(ROOT / iss["record"], text)
-        print(f"PR description: Closes #{iss['number']}  Refs #{parent['number']}")
+        print(f"write the report, delete the unfilled line, then: loe submit   (Closes #{iss['number']}  Refs #{parent['number']})")
         return
 
     if not is_living(iss):
+        require_owner(iss, action="record")
+        start_branch(f"record/{title_slug(iss['title'])}")
         text = render(template_for(iss), title=iss["title"], issue=iss["number"],
                       driver=iss["driver"], date=today, parent="", sub_issue="", period="")
         write_new(slug_dir(iss), text)
-        print(f"PR description: Closes #{iss['number']}")
+        print(f"write the record, delete the unfilled line, then: loe submit   (Closes #{iss['number']})")
         return
 
+    # A recurring parent: pick the cycle, which must already have a sub-issue.
     cad = iss["cadence"]
+    if cad not in RECURRING:
+        sys.exit(f"#{iss['number']} is a standing line with no cadence; record its changes as "
+                 "sub-issues you file by hand, then `loe record <sub-issue#>`.")
     period = a.period or default_period(cad)
-    if cad in RECURRING:
-        parse_period(cad, period)
-    sub = None
-    if not a.no_issue and cad in RECURRING:
-        sub = find_sub(iss, period)
-        if sub is None:
-            sub = create_sub(iss, period)
-            print(f"created sub-issue #{sub['number']} {sub['title']} (due {sub['due']})")
-        else:
-            print(f"using existing sub-issue #{sub['number']}")
-    text = render(template_for(iss), title=iss["title"], parent=iss["number"],
-                  sub_issue=sub["number"] if sub else "<sub-issue>", driver=iss["driver"],
-                  period=period, date=today, issue=sub["number"] if sub else "<sub-issue>")
-    write_new(slug_dir(iss) / f"{period}.md", text)
-    closes = f"Closes #{sub['number']}  " if sub else ""
-    print(f"PR description: {closes}Refs #{iss['number']}")
+    parse_period(cad, period)
+    sub = find_sub(iss, period)
+    if sub is None:
+        sys.exit(f"#{iss['number']} has no sub-issue for {period}. Run: "
+                 f"loe schedule {iss['number']} --start {period} --count 1")
+    print(f"{period} is sub-issue #{sub['number']}")
+    a.issue = sub["number"]
+    cmd_record(a)
+
+
+def record_files():
+    """Record files changed on this branch relative to origin/main, plus untracked ones."""
+    git("fetch", "-q", "origin")
+    changed = git("diff", "--name-only", "origin/main...HEAD").splitlines()
+    changed += git("diff", "--name-only", "HEAD").splitlines()
+    changed += git("ls-files", "--others", "--exclude-standard").splitlines()
+    return sorted({f for f in changed if f.startswith("docs/") and f.endswith(".md")
+                   and not f.endswith("README.md") and (ROOT / f).exists()})
+
+
+def cmd_submit(a):
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    if not branch.startswith("record/"):
+        sys.exit(f"you are on {branch}; `loe submit` runs on a record/ branch made by `loe record`.")
+    files = record_files()
+    if not files:
+        sys.exit("no record file changed on this branch.")
+    closes, refs = [], []
+    for f in files:
+        text = (ROOT / f).read_text()
+        if UNFILLED in text:
+            sys.exit(f"{f} still carries the unfilled line; write the record and delete that line first.")
+        m = re.search(r"\*\*Issue:\*\*\s*#(\d+)(?:\s*\(recurrence of #(\d+)\))?", text)
+        if not m:
+            sys.exit(f"{f} has no **Issue:** #N line.")
+        closes.append(int(m.group(1)))
+        if m.group(2):
+            refs.append(int(m.group(2)))
+    for n in closes:
+        require_owner(load_issue(n), action="submit the record for")
+    title = load_issue(closes[0])["title"]
+    body = "  ".join([f"Closes #{n}" for n in closes] + [f"Refs #{n}" for n in sorted(set(refs))])
+    msg = f"Record: {title}"
+    steps = [["git", "add", *files], ["git", "commit", "-m", msg],
+             ["git", "push", "-u", "origin", branch],
+             ["gh", "pr", "create", "-R", REPO, "--head", branch, "--title", msg, "--body", body]]
+    if a.dry_run:
+        print("would run:")
+        for st in steps:
+            print("  " + " ".join(f'"{x}"' if " " in x else x for x in st))
+        return
+    git("add", *files)
+    git("commit", "-q", "-m", msg)
+    git("push", "-q", "-u", "origin", branch)
+    url = gh("pr", "create", "-R", REPO, "--head", branch, "--title", msg, "--body", body).strip()
+    print(f"PR opened: {url}\n  {body}")
 
 
 def cmd_doc(a):
@@ -449,6 +565,7 @@ def cmd_doc(a):
 def cmd_template(a):
     iss = load_issue(a.issue)
     if a.set:
+        require_owner(iss, action="set the template of")
         text = pathlib.Path(a.source).read_text() if a.source else \
             (DEFAULT_RECORD if is_living(iss) else DEFAULT_COMPLETION)
         fence = "````" if "```" in text else "```"
@@ -472,28 +589,17 @@ def cmd_schedule(a):
     iss = load_issue(a.issue)
     if not is_living(iss):
         sys.exit(f"#{iss['number']} is not a living document (its Doc is a file, not a folder).")
+    require_owner(iss, action="schedule")
     periods = period_sequence(iss["cadence"], a.start, a.count, a.until)
-    tpl = template_for(iss) if a.files else None
-    print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods"
-          + (f", template: {tpl[1]}" if tpl else ""))
-    today = dt.date.today().isoformat()
+    print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(periods)} periods")
     for p in periods:
         sub = find_sub(iss, p)
         if sub:
-            note = f"#{sub['number']:<4} exists"
+            print(f"  {p:<12} #{sub['number']:<4} exists")
         else:
             sub = create_sub(iss, p)
-            note = f"#{sub['number']:<4} created, due {sub['due']}"
-        if tpl:
-            path = ROOT / iss["doc"] / f"{p}.md"
-            if path.exists():
-                note += "; file exists"
-            else:
-                path.write_text(render(tpl, title=iss["title"], parent=iss["number"],
-                                       sub_issue=sub["number"], driver=iss["driver"],
-                                       period=p, date=today, issue=sub["number"]))
-                note += f"; wrote {path.relative_to(ROOT)}"
-        print(f"  {p:<12} {note}")
+            print(f"  {p:<12} #{sub['number']:<4} created, due {sub['due']}")
+    print("next: `loe record <sub-issue#>` when a cycle's report is due.")
 
 
 def lint_tree():
@@ -534,8 +640,15 @@ def lint_tree():
 def cmd_check(a):
     problems = lint_tree()
     if a.pr:
-        pr = json.loads(gh("pr", "view", str(a.pr), "-R", REPO, "--json", "body,files"))
+        pr = json.loads(gh("pr", "view", str(a.pr), "-R", REPO, "--json", "body,files,headRefOid,author"))
         files = [f["path"] for f in pr["files"]]
+        head = pr["headRefOid"]
+        author = pr["author"]["login"]
+
+        def at_head(path):
+            out = gh("api", f"repos/{REPO}/contents/{path}?ref={head}", "--jq", ".content", ok=(0, 1))
+            import base64
+            return base64.b64decode(out).decode() if out.strip() else ""
         closes = {int(n) for n in re.findall(
             r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", pr["body"] or "")}
         if not closes:
@@ -543,19 +656,32 @@ def cmd_check(a):
         for n in sorted(closes):
             iss = load_issue(n)
             if iss["record"]:
-                want = [iss["record"]]
-                ok = iss["record"] in files
+                want = iss["record"]
+                hit = [want] if want in files else []
             elif iss["doc"] and not is_living(iss):
-                want = [iss["doc"]]
-                ok = iss["doc"] in files
+                want = iss["doc"]
+                hit = [want] if want in files else []
             elif iss["doc"]:
-                want = [iss["doc"] + "<period>.md"]
-                ok = any(f.startswith(iss["doc"]) and not f.endswith("README.md") for f in files)
+                want = iss["doc"] + "<period>.md"
+                hit = [f for f in files if f.startswith(iss["doc"]) and not f.endswith("README.md")]
             else:
-                want, ok = ["a **Doc:** line on the issue"], False
-            print(f"  Closes #{n}: {'ok' if ok else 'MISSING'} {want[0]}")
-            if not ok:
-                problems.append(f"PR closes #{n} but does not add {want[0]}")
+                want, hit = "a **Doc:** line on the issue", []
+            if not hit:
+                print(f"  Closes #{n}: MISSING {want}")
+                problems.append(f"PR closes #{n} but does not add {want}")
+                continue
+            unfilled = [f for f in hit if UNFILLED in at_head(f)]
+            if unfilled:
+                print(f"  Closes #{n}: UNFILLED {unfilled[0]}")
+                problems.append(f"PR closes #{n} but {unfilled[0]} still carries the unfilled line")
+                continue
+            allowed = owners(iss)
+            if author not in allowed:
+                who = ", ".join("@" + x for x in sorted(allowed)) or "nobody assigned"
+                print(f"  Closes #{n}: NOT DRIVER @{author} (assignees: {who})")
+                problems.append(f"PR author @{author} is not an assignee of #{n} ({who})")
+            else:
+                print(f"  Closes #{n}: ok {hit[0]} by @{author}")
     for p in problems:
         print("FAIL", p)
     if problems:
@@ -567,11 +693,13 @@ def main():
     ap = argparse.ArgumentParser(prog="loe", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
-    r = sp.add_parser("record", help="write the documentation file for an issue")
-    r.add_argument("issue", type=int)
-    r.add_argument("--period", help="cycle for a recurring issue (default: the current one)")
-    r.add_argument("--no-issue", action="store_true", help="do not find or create the sub-issue")
+    r = sp.add_parser("record", help="start a report: branch + record file from the issue's template")
+    r.add_argument("issue", type=int, help="a recurrence sub-issue, a one-off issue, or a recurring parent with --period")
+    r.add_argument("--period", help="for a recurring parent: the cycle (default: the current one)")
     r.set_defaults(fn=cmd_record)
+    u = sp.add_parser("submit", help="commit, push, and open the PR for the record on this branch")
+    u.add_argument("--dry-run", action="store_true", help="print the commands instead of running them")
+    u.set_defaults(fn=cmd_submit)
     d = sp.add_parser("doc", help="print the Doc path an issue should have; --set writes it into the body")
     d.add_argument("issue", type=int)
     d.add_argument("--set", action="store_true")
@@ -587,8 +715,6 @@ def main():
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--count", type=int, help="number of periods")
     g.add_argument("--until", help="last period, inclusive")
-    s.add_argument("--files", action="store_true",
-                   help="also write docs/<Title>/<period>.md for each period from the issue's template")
     s.set_defaults(fn=cmd_schedule)
     c = sp.add_parser("check", help="lint the tree; with --pr, verify the PR documents what it closes")
     c.add_argument("--pr", type=int)
