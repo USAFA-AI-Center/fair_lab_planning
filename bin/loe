@@ -7,7 +7,7 @@ Every command reads the issue first and derives everything else from it.
   loe record <issue#> [--period P] [--no-issue]
       Write the documentation file for an issue, fields pre-filled from GitHub.
       A cadence:once issue gets its completion record at its Doc path.
-      A recurring issue gets loe/<Title>/<period>.md and, unless --no-issue,
+      A recurring issue gets docs/<Title>/<period>.md and, unless --no-issue,
       the recurrence sub-issue for that period is found or created.
 
   loe schedule <issue#> --start <period> --count N
@@ -20,7 +20,7 @@ Every command reads the issue first and derives everything else from it.
       standing issues, a .md file otherwise). --set writes it into the body.
 
   loe check [--pr N]
-      Without --pr: lint the loe/ tree. With --pr: confirm that every issue the
+      Without --pr: lint the docs/ tree. With --pr: confirm that every issue the
       PR closes gets its documentation file in that PR. Exit 1 on failure.
 
 Needs: python3 (standard library only) and the gh CLI, authenticated.
@@ -86,7 +86,7 @@ def title_slug(title):
 
 def doc_path_for(iss):
     living = iss["cadence"] in ("monthly", "quarterly", "semester", "annual") or iss["cadence"] is None
-    return f"loe/{title_slug(iss['title'])}" + ("/" if living else ".md")
+    return f"docs/{title_slug(iss['title'])}" + ("/" if living else ".md")
 
 
 def is_living(iss):
@@ -254,7 +254,7 @@ def create_sub(parent, period):
 
 # --------------------------------------------------------------------- templates
 def render(template_name, **fields):
-    text = (ROOT / "loe" / template_name).read_text()
+    text = (ROOT / "docs" / template_name).read_text()
     for k, v in fields.items():
         text = text.replace("{{" + k + "}}", str(v))
     left = re.findall(r"{{(\w+)}}", text)
@@ -346,7 +346,7 @@ def cmd_schedule(a):
 
 def lint_tree():
     problems = []
-    for d in sorted((ROOT / "loe").iterdir()):
+    for d in sorted((ROOT / "docs").iterdir()):
         if d.is_dir():
             if not (d / "README.md").exists():
                 problems.append(f"{d.relative_to(ROOT)}/ has no README.md")

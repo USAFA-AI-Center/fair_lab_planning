@@ -2,7 +2,7 @@
 
 Issues in this repo are the FAIR Lab lines of effort. The board is the org project
 [FAIR Lab Lines of Effort 2026](https://github.com/orgs/USAFA-AI-Center/projects/3).
-The `loe/` directory holds the documentation that proves each line of effort was done.
+The `docs/` directory holds the documentation that proves each line of effort was done.
 
 ## How an issue gets to Done
 
@@ -19,10 +19,10 @@ One markdown file, written once, at the path in the issue's **Doc** line. The pa
 issue's exact title with spaces as underscores (path-unsafe characters dropped):
 
 ```
-loe/Make_FAIR_Lab_logo.md
+docs/Make_FAIR_Lab_logo.md
 ```
 
-Copy `loe/TEMPLATE_completion_record.md`, fill it in, open a PR whose description says
+Copy `docs/TEMPLATE_completion_record.md`, fill it in, open a PR whose description says
 `Closes #NN`. Merge closes the issue.
 
 ### Recurring work and standing responsibilities: a living document
@@ -30,7 +30,7 @@ Copy `loe/TEMPLATE_completion_record.md`, fill it in, open a PR whose descriptio
 The parent issue never closes. Its documentation is a folder named the same way:
 
 ```
-loe/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
+docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
   README.md        how the program runs - kept current, edited by ordinary PRs
   2026-10.md       one dated record per recurrence
   2026-11.md
@@ -67,7 +67,7 @@ bin/loe record <issue#> --period 2026-10     write the dated record for a recurr
 bin/loe schedule <issue#> --start 2026-10 --count 12
                                              create 12 recurrence sub-issues with due dates
 bin/loe doc <issue#> --set                   write the Doc path into a new issue's body
-bin/loe check                                lint the loe/ tree
+bin/loe check                                lint the docs/ tree
 bin/loe check --pr <PR#>                     verify the PR documents every issue it closes
 ```
 
@@ -95,5 +95,5 @@ the file at that issue's Doc path fails the check.
 ## Board fields
 
 - **Driver** who owns the line of effort
-- **Doc** the path under `loe/` where its documentation lives
+- **Doc** the path under `docs/` where its documentation lives
 - **Priority**, **Target date** set by the driver and the lab lead
