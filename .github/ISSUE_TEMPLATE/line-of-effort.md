@@ -6,5 +6,5 @@ labels: needs-scope
 
 **Driver:**
 **Notes:**
-**Doc:** docs/Exact_Title_With_Underscores.md  (run `bin/loe doc <issue#> --set` after filing)
+**Doc:** docs/Exact_Title_With_Underscores.md  (run `bin/logbook doc <issue#> --set` after filing)
 **Done means:**

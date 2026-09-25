@@ -10,4 +10,4 @@ jobs:
       - name: Every closed issue gets its documentation in this PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 bin/loe check --pr ${{ github.event.pull_request.number }}
+        run: python3 bin/logbook check --pr ${{ github.event.pull_request.number }}

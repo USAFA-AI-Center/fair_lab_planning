@@ -4,29 +4,29 @@
 
 # FAIR Lab planning
 
-Issues in this repo are the FAIR Lab lines of effort. The board is the org project
-[FAIR Lab Lines of Effort 2026](https://github.com/orgs/USAFA-AI-Center/projects/3).
-The `docs/` directory holds the documentation that proves each line of effort was done.
+This repository provides automations for creating/documenting tasks for the Falcon AI Research Lab (FAIR). 
 
-## How an issue gets to Done
+Source of truth for all active tasks for the current year: [FAIR Lab Lines of Effort 2026](https://github.com/orgs/USAFA-AI-Center/projects/3).
 
-Nobody closes an issue by hand. A pull request closes it, and the pull request adds the
-documentation. Merging the PR closes the issue and the board moves it to Done on its own.
-That is the whole mechanism: no PR, no Done, and every Done has a write-up behind it.
+All work tracking will be contained within the `docs/` directory. 
 
-There are two kinds of documentation, and the issue's `cadence:` label tells you which one
-applies.
+## How we complete and track work
 
-### One-off work (`cadence:once`): a completion record
+Issues are NEVER closed through [the project board](https://github.com/orgs/USAFA-AI-Center/projects/3). We will close ALL issues PROGRAMATICALLY. 
 
-One markdown file, written once, at the path in the issue's **Doc** line. The path is the
+Issues will be marked as DONE when a pull request (tied to the issue) is closed. The PR adds the appropriate docuemntation to `docs/`.
+
+## Two Task Types
+### (`cadence:once`): a completion record
+
+One markdown file at the path in the issue's **Doc** line. The path is the
 issue's exact title with spaces as underscores (path-unsafe characters dropped):
 
 ```
 docs/Make_FAIR_Lab_logo.md
 ```
 
-Run `bin/loe record <issue#>` to generate it with the header filled in, write it, open a PR
+Run `bin/logbook record <issue#>` to generate it with the header filled in, write it, open a PR
 whose description says `Closes #NN`. Merge closes the issue.
 
 ### Recurring work and standing responsibilities: a living document
@@ -35,7 +35,6 @@ The parent issue never closes. Its documentation is a folder named the same way:
 
 ```
 docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
-  README.md        how the program runs - kept current, edited by ordinary PRs
   2026-10.md       one dated record per recurrence
   2026-11.md
 ```
@@ -43,8 +42,6 @@ docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
 Each recurrence is a sub-issue of the parent (use the "Recurrence" issue template). The PR
 that adds the dated record says `Closes #<sub-issue>` and `Refs #<parent>`. The parent's
 "Sub-issues progress" column on the board is the completion tracker.
-
-Edits to a living README are ordinary PRs that say `Refs #NN`. They never close anything.
 
 ### One-off work whose output keeps changing
 
@@ -57,9 +54,9 @@ first version merges, and later revisions are PRs that say `Refs #NN`.
 | Keyword | Effect | Use it when |
 |---|---|---|
 | `Closes #NN` | merging closes issue NN and moves it to Done | the PR is the completion record, or the dated record for a recurrence sub-issue |
-| `Refs #NN` | links the PR to issue NN, nothing closes | editing a living README, or any partial progress |
+| `Refs #NN` | links the PR to issue NN, nothing closes | any partial progress, or a later revision of a document that already closed its issue |
 
-## Tools: `bin/loe`
+## Tools: `bin/logbook`
 
 The issues are the source of truth; the scripts read them and generate the rest. Needs
 `python3` and an authenticated `gh`. Two commands do the work, and they touch different things.
@@ -67,7 +64,7 @@ The issues are the source of truth; the scripts read them and generate the rest.
 **Generate the issues for a recurring line of effort** (touches GitHub only, nothing in the repo):
 
 ```
-bin/loe schedule 9 --start 2026-10 --count 12        # or --until 2027-09
+bin/logbook schedule 9 --start 2026-10 --count 12        # or --until 2027-09
 ```
 
 One sub-issue per period under #9, each on the board as Todo with its due date as Target date,
@@ -76,18 +73,18 @@ labeled `recurrence`, with its record path in the body. Periods that already exi
 **Write one period's report** (touches one file, on its own branch):
 
 ```
-bin/loe record 33            # 33 is October's sub-issue; or: bin/loe record 9 --period 2026-10
+bin/logbook record 33            # 33 is October's sub-issue; or: bin/logbook record 9 --period 2026-10
 ```
 
 This creates a branch from `origin/main` and writes the record file from #9's template with the
 header filled in. Write the report, delete the `unfilled` line, then:
 
 ```
-bin/loe submit               # commits, pushes, opens the PR with "Closes #33  Refs #9"
+bin/logbook submit               # commits, pushes, opens the PR with "Closes #33  Refs #9"
 ```
 
 The check runs, you merge, #33 closes, and the board moves it to Done. A one-off issue works the
-same way: `bin/loe record 7`, write, `bin/loe submit`, and the PR says `Closes #7`.
+same way: `bin/logbook record 7`, write, `bin/logbook submit`, and the PR says `Closes #7`.
 
 **Without the CLI:** open the issue, follow its record path, create the file on GitHub, and at the
 bottom of the editor choose "Create a new branch for this commit and start a pull request." Put
@@ -102,10 +99,10 @@ Add a second assignee when someone needs to cover for the driver.
 Other commands:
 
 ```
-bin/loe doc <issue#> --set                   write the Doc path into a new issue's body
-bin/loe template <issue#> [--set]            show or write the issue's ## Template block
-bin/loe check                                lint the docs/ tree
-bin/loe check --pr <PR#>                     what the workflow runs on every PR
+bin/logbook doc <issue#> --set                   write the Doc path into a new issue's body
+bin/logbook template <issue#> [--set]            show or write the issue's ## Template block
+bin/logbook check                                lint the docs/ tree
+bin/logbook check --pr <PR#>                     what the workflow runs on every PR
 ```
 
 ### Templates live in the issues
@@ -117,10 +114,10 @@ in order:
 1. the `## Template` block in the issue's own body;
 2. the block in the issue named by a `**Template:** #N` line, so several lines of effort can
    share one form;
-3. the built-in default in `bin/loe` for a recurring or a one-off issue.
+3. the built-in default in `bin/logbook` for a recurring or a one-off issue.
 
-`bin/loe template <issue#>` shows the effective template and where it came from.
-`bin/loe template <issue#> --set` writes the built-in default into the issue as a `## Template`
+`bin/logbook template <issue#>` shows the effective template and where it came from.
+`bin/logbook template <issue#> --set` writes the built-in default into the issue as a `## Template`
 block; the driver then edits it there, and every later record follows it. A template is ordinary
 markdown with these fields: `{{title}}`, `{{parent}}`, `{{sub_issue}}`, `{{driver}}`, `{{period}}`,
 `{{date}}`, `{{issue}}`. Keep an `**Issue:** #{{sub_issue}}` line in it (or `#{{issue}}` for a
@@ -141,7 +138,7 @@ adds the file at that issue's record path and that file no longer carries the `u
 - `partner:` the outside party that has to show up
 - `needs-scope` no definition of done yet; `needs-external-help`; `blocked`; `faculty-lecture`
   (the tool should be presented to faculty at a coaching seminar when it ships);
-  `recurrence` (one cycle of a recurring line, generated by `bin/loe schedule`)
+  `recurrence` (one cycle of a recurring line, generated by `bin/logbook schedule`)
 
 ## Board fields
 
