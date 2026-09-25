@@ -13,6 +13,8 @@ People drive it with comments; the bot workflow runs `logbook handle`:
                           on the board as Todo with its due date as Target date.
                           Existing periods are skipped, so re-running is safe.
   /change <short name>    on a standing issue: file one change as a sub-issue
+  /followup <title>       on a one-off issue: file new work it turned up as its own
+                          issue, listed under the issue's Follow-ups and in its record
   /done                   on a one-off issue or a sub-issue, when the work is
                           finished: open the record PR from the issue's template
                           and reply with a link to write it. On a recurring or
@@ -35,7 +37,7 @@ People drive it with comments; the bot workflow runs `logbook handle`:
   Fields: {{title}} {{parent}} {{sub_issue}} {{driver}} {{period}} {{date}}
   {{issue}}. Keep the "**Issue:** #N" line; the check relies on it.
 
-  Periods by cadence: weekly 2026-W40 (due Sunday), monthly 2026-10, quarterly
+  Periods by cadence: weekly 2026-09-28 (its Monday; due Sunday), monthly 2026-10, quarterly
   2026-Q4, semester 2026-fall (due Dec 15) / 2027-spring (due May 15),
   annual 2026. All others are due on the period's last day.
 
@@ -119,9 +121,7 @@ _Links anyone can open to confirm the work: the repo, the deployed site, the doc
 
 ## Follow-ups filed
 
-_New issues this work turned up, one per line, or "none". For example:_
-
-- #45 Add a dark-mode version of the logo
+{{followups}}
 """
 
 TEMPLATE_BLOCK = re.compile(r"^## Template\s*\n(`{3,})[a-z]*\n(.*?)\n\1[ \t]*$", re.S | re.M)
@@ -181,12 +181,14 @@ def load_issue(n):
     parent = int(m.group(1)) if m else None
     m = re.search(r"\*\*Cycle:\*\*\s*(\S+)", body)
     cycle = m.group(1) if m else None
+    m = re.search(r"\*\*Follow-up of:\*\*\s*#(\d+)", body)
+    follow_of = int(m.group(1)) if m else None
     m = re.search(r"\*\*Template:\*\*\s*#(\d+)", body)
     template_ref = int(m.group(1)) if m else None
     m = TEMPLATE_BLOCK.search(body)
     template_text = m.group(2) + "\n" if m else None
     return dict(raw, body=body, labels=labels, cadence=cad, driver=driver, doc=doc,
-                record=record, parent=parent, cycle=cycle, template_ref=template_ref,
+                record=record, parent=parent, cycle=cycle, template_ref=template_ref, follow_of=follow_of,
                 template_text=template_text,
                 assignees={x["login"] for x in raw.get("assignees") or []})
 
@@ -277,8 +279,7 @@ def sync_doc(iss):
 def default_period(cad, day=None):
     d = day or today()
     if cad == "weekly":
-        y, w, _ = d.isocalendar()
-        return f"{y}-W{w:02d}"
+        return (d - dt.timedelta(days=d.weekday())).isoformat()
     if cad == "monthly":
         return f"{d.year}-{d.month:02d}"
     if cad == "quarterly":
@@ -313,6 +314,23 @@ def period_start(cad, p):
     return dt.date(y, 1, 1)
 
 
+def period_label(cad, p):
+    """How a period reads in a sub-issue title: Week of Sep 28, 2026 / October 2026 / Q4 2026 (Oct to Dec)."""
+    if cad not in RECURRING:
+        return p
+    y, i = parse_period(cad, p)
+    start = period_start(cad, p)
+    if cad == "weekly":
+        return f"Week of {start:%b} {start.day}, {start.year}"
+    if cad == "monthly":
+        return f"{start:%B %Y}"
+    if cad == "quarterly":
+        return f"Q{i} {y} ({start:%b} to {due_date(cad, p):%b})"
+    if cad == "semester":
+        return f"{'Spring' if i == 0 else 'Fall'} {y}"
+    return str(y)
+
+
 def to_period(cad, token):
     """A period from what a person types: a date (the period containing it), `next`, or a period."""
     if token.lower() == "next":
@@ -322,8 +340,7 @@ def to_period(cad, token):
             return default_period(cad, dt.date.fromisoformat(token))
         except ValueError:
             raise Refuse(f"`{token}` is not a real date.")
-    parse_period(cad, token)
-    return token
+    return format_period(cad, *parse_period(cad, token))
 
 
 def schedule_args(cad, args):
@@ -343,6 +360,13 @@ def schedule_args(cad, args):
 
 def parse_period(cad, p):
     """Return (year, index) for the cadence, or refuse with the expected format."""
+    # A week is named by its Monday; the ISO form 2026-W40 is still read.
+    if cad == "weekly" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", p):
+        try:
+            y, w, _ = dt.date.fromisoformat(p).isocalendar()
+        except ValueError:
+            raise Refuse(f"`{p}` is not a real date.")
+        return y, w
     fmt = {"weekly": r"^(\d{4})-W(\d{2})$",
            "monthly": r"^(\d{4})-(\d{2})$", "quarterly": r"^(\d{4})-Q([1-4])$",
            "semester": r"^(\d{4})-(fall|spring)$", "annual": r"^(\d{4})$"}
@@ -351,7 +375,7 @@ def parse_period(cad, p):
                      f"{', '.join(RECURRING)} issues.")
     m = re.match(fmt[cad], p)
     if not m:
-        example = {"weekly": "2026-W40", "monthly": "2026-10", "quarterly": "2026-Q4",
+        example = {"weekly": "2026-09-28", "monthly": "2026-10", "quarterly": "2026-Q4",
                    "semester": "2026-fall", "annual": "2026"}[cad]
         raise Refuse(f"`{p}` is not a date or a {cad} period. Use a date like `2026-10-01`, "
                      f"`next`, or a period like `{example}`.")
@@ -377,7 +401,7 @@ def parse_period(cad, p):
 
 def format_period(cad, y, i):
     if cad == "weekly":
-        return f"{y}-W{i:02d}"
+        return dt.date.fromisocalendar(y, i, 1).isoformat()
     if cad == "monthly":
         return f"{y}-{i:02d}"
     if cad == "quarterly":
@@ -403,7 +427,7 @@ def next_period(cad, y, i):
 def period_sequence(cad, start, count=None, until=None):
     y, i = parse_period(cad, start)
     if until:
-        parse_period(cad, until)
+        until = format_period(cad, *parse_period(cad, until))
     out = []
     while True:
         p = format_period(cad, y, i)
@@ -471,7 +495,28 @@ def subs_of(parent):
             for page in pages for s in page]
 
 
-SUB_LIST = re.compile(r"^## Sub-issues\n<!-- logbook:sub-issues -->\n.*?<!-- /logbook:sub-issues -->\n?", re.S | re.M)
+def bot_section(heading, marker):
+    return re.compile(rf"^## {heading}\n<!-- logbook:{marker} -->\n.*?<!-- /logbook:{marker} -->\n?", re.S | re.M)
+
+
+SUB_LIST = bot_section("Sub-issues", "sub-issues")
+FOLLOW_LIST = bot_section("Follow-ups", "follow-ups")
+
+
+def write_section(number, body, heading, marker, note, lines):
+    """Put a bot-kept list in an issue body, above ## Template, replacing the last copy."""
+    block = (f"## {heading}\n<!-- logbook:{marker} -->\n_{note}_\n\n" + "\n".join(lines)
+             + f"\n<!-- /logbook:{marker} -->\n")
+    body = body.replace("\r\n", "\n")
+    pattern = bot_section(heading, marker)
+    if pattern.search(body):
+        new = pattern.sub(lambda _: block, body, count=1)
+    elif re.search(r"^## Template\s*$", body, re.M):
+        new = re.sub(r"^(## Template\s*)$", lambda m: block + "\n" + m.group(1), body, count=1, flags=re.M)
+    else:
+        new = body.rstrip() + "\n\n" + block
+    if new != body:
+        gh("issue", "edit", str(number), "-R", REPO, "--body", new)
 
 
 def refresh_sub_list(number, done=()):
@@ -491,22 +536,64 @@ def refresh_sub_list(number, done=()):
             lines.append(f"- #{sub['number']} {name} · not planned")
         else:
             lines.append(f"- #{sub['number']} {name} · open")
-    block = ("## Sub-issues\n<!-- logbook:sub-issues -->\n_The bot keeps this list._\n\n"
-             + "\n".join(lines) + "\n<!-- /logbook:sub-issues -->\n")
-    body = parent["body"].replace("\r\n", "\n")
-    if SUB_LIST.search(body):
-        new = SUB_LIST.sub(lambda _: block, body, count=1)
-    elif re.search(r"^## Template\s*$", body, re.M):
-        new = re.sub(r"^(## Template\s*)$", lambda m: block + "\n" + m.group(1), body, count=1, flags=re.M)
-    else:
-        new = body.rstrip() + "\n\n" + block
-    if new != body:
-        gh("issue", "edit", str(number), "-R", REPO, "--body", new)
+    write_section(number, parent["body"], "Sub-issues", "sub-issues", "The bot keeps this list.", lines)
+
+
+def followups_of(iss):
+    """[(number, title, state)] of the follow-ups listed in an issue's bot-kept section."""
+    m = FOLLOW_LIST.search(iss["body"].replace("\r\n", "\n"))
+    out = []
+    for n in re.findall(r"^- #(\d+)", m.group(0), re.M) if m else []:
+        f = json.loads(gh("issue", "view", n, "-R", REPO, "--json", "number,title,state,stateReason"))
+        out.append((f["number"], f["title"], "done" if f["state"] == "CLOSED" and f["stateReason"] != "NOT_PLANNED"
+                    else "not planned" if f["state"] == "CLOSED" else "open"))
+    return out
+
+
+def refresh_followups(number, add=None, done=()):
+    """Rewrite an issue's "## Follow-ups" section; `add` a new follow-up number to it."""
+    iss = load_issue(number)
+    rows = followups_of(iss)
+    if add and add not in {n for n, _, _ in rows}:
+        f = load_issue(add)
+        rows.append((add, f["title"], "open"))
+    if not rows:
+        return
+    lines = [f"- #{n} {t} · {'done' if n in done else s}" for n, t, s in sorted(rows)]
+    write_section(number, iss["body"], "Follow-ups", "follow-ups",
+                  "The bot keeps this list. Comment `/followup <title>` to add one.", lines)
+
+
+def file_followup(iss, login, title):
+    """A new one-off issue for work this one turned up; returns its number and url."""
+    if kind(iss) != "once":
+        raise Refuse(f"#{iss['number']} is not a one-off; `/followup` is for `cadence:once` issues. "
+                     "A recurring or standing line records new work in its sub-issues.")
+    require_owner(iss, login, "file a follow-up for")
+    labels = ["cadence:once", "needs-scope"] + sorted(l for l in iss["labels"] if l.startswith("kind:"))
+    args = ["issue", "create", "-R", REPO, "--title", title,
+            "--body", f"**Follow-up of:** #{iss['number']}\n\n{PLACEHOLDER}"]
+    for label in labels:
+        args += ["--label", label]
+    for a in sorted(iss["assignees"]):
+        args += ["--assignee", a]
+    url = gh(*args).strip()
+    new = load_issue(int(url.rstrip("/").rsplit("/", 1)[1]))
+    # The bot's own new issue does not trigger the workflow, so it sets the issue up here.
+    sync_doc(new)
+    set_board(new["url"], "Todo")
+    reply(new["number"], welcome(new))
+    refresh_followups(iss["number"], add=new["number"])
+    return new["number"], new["url"]
 
 
 def find_sub(parent, period):
-    title = sub_title(parent, period)
-    return next((s for s in subs_of(parent) if s["title"] == title), None)
+    """The sub-issue for a period (by its Cycle line or title) or for a named change (by title)."""
+    titles = {sub_title(parent, period), sub_title(parent, period_label(parent["cadence"], period))
+              if parent["cadence"] in RECURRING else sub_title(parent, period)}
+    return next((s for s in subs_of(parent)
+                 if s["title"] in titles or re.search(rf"^\*\*Cycle:\*\*\s*{re.escape(period)}\s*$", s["body"], re.M)),
+                None)
 
 
 def ensure_label():
@@ -566,7 +653,7 @@ def schedule(iss, login, start, count=None, until=None):
         if sub:
             rows.append((p, sub["number"], False, due_date(iss["cadence"], p)))
         else:
-            sub = create_sub(iss, p, due_date(iss["cadence"], p))
+            sub = create_sub(iss, p, due_date(iss["cadence"], p), name=period_label(iss["cadence"], p))
             rows.append((p, sub["number"], True, sub["due"]))
     refresh_sub_list(iss["number"])
     return rows
@@ -646,16 +733,18 @@ def record_target(iss):
         if not iss["record"] or not iss["parent"]:
             raise Refuse(f"#{iss['number']} is a recurrence but has no **Parent:** and **Record:** lines.")
         parent = load_issue(iss["parent"])
-        period = iss["cycle"] or "cycle"
+        period = iss["title"].removeprefix(parent["title"] + ": ")
         text = render(template_for(parent), title=parent["title"], parent=parent["number"],
                       sub_issue=iss["number"], driver=driver_of(iss), period=period,
-                      date=date, issue=iss["number"])
+                      date=date, issue=iss["number"], followups="none")
         return dict(closes=iss["number"], refs=parent["number"], path=iss["record"],
                     title=iss["title"], text=text)
     if k == "once":
         sync_doc(iss)
-        text = render(template_for(iss), title=iss["title"], issue=iss["number"],
-                      driver=driver_of(iss), date=date, parent="", sub_issue="", period="")
+        rows = followups_of(iss)
+        filed = "\n".join(f"- #{n} {t}" for n, t, s in rows if s != "not planned") or "none"
+        text = render(template_for(iss), title=iss["title"], issue=iss["number"], driver=driver_of(iss),
+                      date=date, parent="", sub_issue="", period="", followups=filed)
         return dict(closes=iss["number"], refs=None, path=iss["doc"], title=iss["title"], text=text)
     if k in ("recurring", "standing"):
         # A parent closes only after every sub-issue has, with a closeout record of its own.
@@ -668,7 +757,8 @@ def record_target(iss):
                          "closed, `/done` here opens the closeout record that closes this issue.")
         sync_doc(iss)
         text = render((DEFAULT_COMPLETION, "built-in closeout"), title=f"{iss['title']}: closeout",
-                      issue=iss["number"], driver=driver_of(iss), date=date, parent="", sub_issue="", period="")
+                      issue=iss["number"], driver=driver_of(iss), date=date, parent="", sub_issue="", period="",
+                      followups="none")
         return dict(closes=iss["number"], refs=None, path=iss["doc"] + CLOSEOUT,
                     title=f"{iss['title']}: closeout", text=text)
     raise Refuse(f"#{iss['number']} has no `cadence:` label. Add one first.")
@@ -799,6 +889,7 @@ HELP = """\
 | one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
 | recurring or standing issue | `/done` | every sub-issue is closed: the bot opens the closeout record PR |
 | standing issue | `/change <short name>` | files one change as a sub-issue |
+| one-off issue | `/followup <title>` | files new work this issue turned up; the record lists it |
 | any issue but a sub-issue | `/template` | fills in the body and the record template |
 | record PR | `/done` | the record is written: the bot checks it and merges it |
 | anywhere | `/help` | this list |
@@ -822,7 +913,7 @@ def welcome(iss):
     elif k == "once":
         lines = [f"This is a one-off. Its record goes in `{iss['doc']}`.",
                  "",
-                 "1. When the work is done, comment `/done` here.",
+                 "1. When the work is done, comment `/done` here. New work it turns up: `/followup <title>`.",
                  "2. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
     elif k == "standing":
         lines = [f"This is a standing responsibility. Its records go in `{iss['doc']}`.",
@@ -935,10 +1026,15 @@ def issue_command(iss, login, cmd, args):
             raise Refuse(f"#{iss['number']} is not a recurring issue; `/schedule` needs a "
                          f"`cadence:` label of {', '.join(RECURRING)}.")
         rows = schedule(iss, login, *schedule_args(iss["cadence"], args))
-        table = "\n".join(f"| {p} | #{n} | {'created' if c else 'already existed'} | {d} |"
+        table = "\n".join(f"| {period_label(iss['cadence'], p)} | #{n} | {'created' if c else 'already existed'} | {d} |"
                           for p, n, c, d in rows)
         return ("| Period | Sub-issue | | Due |\n|---|---|---|---|\n" + table +
                 "\n\nWhen a period's work is done, comment `/done` on its sub-issue.")
+    if cmd == "/followup":
+        if not args:
+            raise Refuse("Usage: `/followup <title>`, e.g. `/followup Add a dark-mode logo`.")
+        n, url = file_followup(iss, login, " ".join(args))
+        return f"Filed #{n} and added it to this issue's Follow-ups. The record lists it when you `/done`."
     if cmd == "/change":
         if not args:
             raise Refuse("Usage: `/change <short name>`, e.g. `/change GPU rebuild`.")
@@ -1024,6 +1120,8 @@ def on_pr_closed(payload):
         set_board(iss["url"], "Done")
         if iss["parent"]:
             refresh_sub_list(iss["parent"], done=set(closed))
+        if iss["follow_of"]:
+            refresh_followups(iss["follow_of"], done=set(closed))
 
 
 def handle(event, payload):

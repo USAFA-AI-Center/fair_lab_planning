@@ -67,9 +67,10 @@ For work done once: `once`. The issue closes when its record merges.
 5. Click **Create**. The bot labels the issue, puts it on the board as Todo, and comments the next steps.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`.
-8. Do the work. When it is finished, comment `/done` on the issue. The bot opens a PR and replies with an edit link.
-9. Click the edit link, replace the placeholder text, click **Commit changes**.
-10. Comment `/done` on the PR. The bot merges it. The issue closes and the board marks it Done.
+8. Do the work. If it turns up new work, comment `/followup <title>`, e.g. `/followup Add a dark-mode logo`. The bot files it as a new one-off issue and lists it under **Follow-ups** in this issue.
+9. When the work is finished, comment `/done` on the issue. The bot opens a PR and replies with an edit link. The record's **Follow-ups filed** section is already filled in.
+10. Click the edit link, replace the placeholder text, click **Commit changes**.
+11. Comment `/done` on the PR. The bot merges it. The issue closes and the board marks it Done.
 
 Record: `docs/Make_FAIR_Lab_logo.md`.
 
@@ -100,20 +101,22 @@ the end.
 ## Schedule formats
 
 `/schedule <start date> <how many>`. The start date is any day: the bot starts at the week, month,
-quarter, semester, or year that contains it. `next` instead of a date starts at the next period.
+quarter, semester, or year that contains it. A period is one unit of the issue's cadence.
 
-| Cadence | Example | Creates | Each period is due |
-|---|---|---|---|
-| `weekly` | `/schedule 2026-09-28 5` | 5 weeks, Sep 28 to Nov 1 2026 | Sunday |
-| `monthly` | `/schedule 2026-10-01 8` | 8 months, Oct 2026 to May 2027 | last day of the month |
-| `quarterly` | `/schedule 2026-10-01 4` | 4 quarters, Oct 2026 to Sep 2027 | last day of the quarter |
-| `semester` | `/schedule 2026-08-01 4` | 4 semesters, fall 2026 to spring 2028 | Dec 15 (fall), May 15 (spring) |
-| `annual` | `/schedule 2026-01-01 3` | 3 years, 2026 to 2028 | Dec 31 |
-| any | `/schedule next 5` | the next 5 periods | |
+| Cadence | Example | Creates | Sub-issue titles | Each period is due |
+|---|---|---|---|---|
+| `weekly` | `/schedule 2026-09-28 5` | 5 weeks, Sep 28 to Nov 1 2026 | Week of Sep 28, 2026 | Sunday |
+| `monthly` | `/schedule 2026-10-01 8` | 8 months, Oct 2026 to May 2027 | October 2026 | last day of the month |
+| `quarterly` | `/schedule 2026-10-01 4` | 4 quarters, Oct 2026 to Sep 2027 | Q4 2026 (Oct to Dec) | last day of the quarter |
+| `semester` | `/schedule 2026-08-01 4` | 4 semesters, fall 2026 to spring 2028 | Fall 2026 | Dec 15 (fall), May 15 (spring) |
+| `annual` | `/schedule 2026-01-01 3` | 3 years, 2026 to 2028 | 2026 | Dec 31 |
+
+`next` instead of a date starts at the next period of the issue's cadence: `/schedule next 5` is
+the next 5 weeks on a weekly issue, the next 5 months on a monthly one.
 
 Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to Dec) and spring
-(Jan to Jun). Sub-issues and records are named by period: `2026-W40`, `2026-10`, `2026-Q4`,
-`2026-fall`, `2026`.
+(Jan to Jun). Record files use a short, sortable name: `2026-09-28.md` (the week's Monday),
+`2026-10.md`, `2026-Q4.md`, `2026-fall.md`, `2026.md`.
 
 ## Commands
 
@@ -122,6 +125,7 @@ Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to De
 | any issue but a sub-issue | `/template` | fills in the body and the record template |
 | recurring issue | `/schedule <start date> <how many>` | creates the sub-issues; re-run to extend |
 | standing issue | `/change <short name>` | files one change as a sub-issue |
+| one-off issue | `/followup <title>` | files new work as its own issue; the record lists it |
 | one-off issue or sub-issue | `/done` | opens the record PR |
 | recurring or standing issue | `/done` | once every sub-issue is closed, opens the closeout PR |
 | record PR | `/done` | checks the record and merges it |
