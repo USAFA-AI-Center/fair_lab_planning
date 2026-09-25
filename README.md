@@ -146,7 +146,8 @@ Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to De
 
 A record is generated from the `## Template` block in the issue body, added by `/template`. A
 sub-issue uses its parent's. `**Template:** #N` in the body borrows another issue's template. With
-neither, the bot uses the default. Leave the `**Issue:**` line and the `{{...}}` fields as they are.
+neither, the bot uses the default. A template holds only the sections you write. The bot adds the
+header (title, issue, driver, date) to every record, and the follow-ups to a one-off's.
 
 ## The check
 

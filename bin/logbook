@@ -27,15 +27,16 @@ People drive it with comments; the bot workflow runs `logbook handle`:
   /help                   list the commands
 
   Who may act: only an assignee of the issue (for a recurrence, of the
-  sub-issue or its parent). The Driver line in the body is prose; the assignee
-  list is the identity GitHub can verify.
+  sub-issue or its parent). The assignee is the driver.
 
   Templates live in the issues, never in docs/. A record is rendered from, in
   order: the fenced block under "## Template" in the issue's own body; the block
   in the issue named by a "**Template:** #N" line (one form shared by several
   lines of effort); else the built-in default for a recurring or one-off issue.
-  Fields: {{title}} {{parent}} {{sub_issue}} {{driver}} {{period}} {{date}}
-  {{issue}}. Keep the "**Issue:** #N" line; the check relies on it.
+  A template holds only the sections a person writes. The bot adds the header
+  (title, **Issue:** line, driver, date) and, for a one-off, Follow-ups filed.
+  Fields still available: {{title}} {{parent}} {{sub_issue}} {{driver}}
+  {{period}} {{date}} {{issue}}.
 
   Periods by cadence: weekly 2026-09-28 (its Monday; due Sunday), monthly 2026-10, quarterly
   2026-Q4, semester 2026-fall (due Dec 15) / 2027-spring (due May 15),
@@ -79,14 +80,9 @@ MAX_PERIODS = 520
 SCAFFOLD_MSG = "logbook: scaffold record for #"
 CLOSES = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)")
 
+# Templates hold only what a person writes. The bot adds each record's header (title, issue,
+# driver, date) above it, and a one-off's Follow-ups filed below it.
 DEFAULT_RECORD = """\
-# {{title}}: {{period}}
-
-- **Issue:** #{{sub_issue}} (recurrence of #{{parent}})
-- **Driver:** {{driver}}
-- **Period:** {{period}}
-- **Recorded:** {{date}}
-
 ## What happened
 
 _Two to five sentences._
@@ -105,12 +101,6 @@ _What to do differently next period, or "nothing"._
 """
 
 DEFAULT_COMPLETION = """\
-# {{title}}
-
-- **Issue:** #{{issue}}
-- **Driver:** {{driver}}
-- **Completed:** {{date}}
-
 ## What was done
 
 _Two to five sentences: what exists now that did not before._
@@ -118,10 +108,6 @@ _Two to five sentences: what exists now that did not before._
 ## Evidence
 
 _Links anyone can open to confirm the work: the repo, the deployed site, the document, the email, a photo._
-
-## Follow-ups filed
-
-{{followups}}
 """
 
 TEMPLATE_BLOCK = re.compile(r"^## Template\s*\n(`{3,})[a-z]*\n(.*?)\n\1[ \t]*$", re.S | re.M)
@@ -725,6 +711,15 @@ def set_template(iss, login, source_text=None):
 
 
 # ----------------------------------------------------------------------- records
+def with_header(text, heading, facts):
+    """The record: the bot's header, then the rendered template. An older template that still
+    carries its own **Issue:** line keeps it, with no second header."""
+    if re.search(r"^- \*\*Issue:\*\*", text, re.M):
+        return text
+    lines = [f"# {heading}", ""] + [f"- **{k}:** {v}" for k, v in facts] + [""]
+    return "\n".join(lines) + "\n" + text.lstrip()
+
+
 def record_target(iss):
     """What a record for this issue closes, where it goes, and its rendered text."""
     k = kind(iss)
@@ -737,6 +732,10 @@ def record_target(iss):
         text = render(template_for(parent), title=parent["title"], parent=parent["number"],
                       sub_issue=iss["number"], driver=driver_of(iss), period=period,
                       date=date, issue=iss["number"], followups="none")
+        what = "Period" if parent["cadence"] in RECURRING else "Change"
+        text = with_header(text, f"{parent['title']}: {period}", [
+            ("Issue", f"#{iss['number']} (sub-issue of #{parent['number']})"), ("Driver", driver_of(iss)),
+            (what, period), ("Recorded", date)])
         return dict(closes=iss["number"], refs=parent["number"], path=iss["record"],
                     title=iss["title"], text=text)
     if k == "once":
@@ -745,6 +744,11 @@ def record_target(iss):
         filed = "\n".join(f"- #{n} {t}" for n, t, s in rows if s != "not planned") or "none"
         text = render(template_for(iss), title=iss["title"], issue=iss["number"], driver=driver_of(iss),
                       date=date, parent="", sub_issue="", period="", followups=filed)
+        # The bot writes this section from the issue's Follow-ups list; templates leave it out.
+        if "## Follow-ups filed" not in text:
+            text = text.rstrip() + f"\n\n## Follow-ups filed\n\n{filed}\n"
+        text = with_header(text, iss["title"], [
+            ("Issue", f"#{iss['number']}"), ("Driver", driver_of(iss)), ("Completed", date)])
         return dict(closes=iss["number"], refs=None, path=iss["doc"], title=iss["title"], text=text)
     if k in ("recurring", "standing"):
         # A parent closes only after every sub-issue has, with a closeout record of its own.
@@ -759,6 +763,8 @@ def record_target(iss):
         text = render((DEFAULT_COMPLETION, "built-in closeout"), title=f"{iss['title']}: closeout",
                       issue=iss["number"], driver=driver_of(iss), date=date, parent="", sub_issue="", period="",
                       followups="none")
+        text = with_header(text, f"{iss['title']}: closeout", [
+            ("Issue", f"#{iss['number']}"), ("Driver", driver_of(iss)), ("Completed", date)])
         return dict(closes=iss["number"], refs=None, path=iss["doc"] + CLOSEOUT,
                     title=f"{iss['title']}: closeout", text=text)
     raise Refuse(f"#{iss['number']} has no `cadence:` label. Add one first.")
