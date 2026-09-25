@@ -1,6 +1,5 @@
 name: Line of effort
 description: A new line of effort for the FAIR Lab board
-labels: [needs-scope]
 body:
   - type: markdown
     attributes:
@@ -14,12 +13,5 @@ body:
       label: Cadence
       description: "`once` closes when done. `weekly` to `annual` get one sub-issue per period. `standing` never closes; each change is filed with `/change`."
       options: [once, weekly, monthly, quarterly, semester, annual, standing]
-    validations:
-      required: true
-  - type: dropdown
-    id: kind
-    attributes:
-      label: Kind
-      options: [admin, build, infra, integration, report, service]
     validations:
       required: true

@@ -556,7 +556,7 @@ def file_followup(iss, login, title):
         raise Refuse(f"#{iss['number']} is not a one-off; `/followup` is for `cadence:once` issues. "
                      "A recurring or standing line records new work in its sub-issues.")
     require_owner(iss, login, "file a follow-up for")
-    labels = ["cadence:once", "needs-scope"] + sorted(l for l in iss["labels"] if l.startswith("kind:"))
+    labels = ["cadence:once"]
     args = ["issue", "create", "-R", REPO, "--title", title,
             "--body", f"**Follow-up of:** #{iss['number']}\n\n{PLACEHOLDER}"]
     for label in labels:
@@ -679,8 +679,7 @@ OLD_TEMPLATE_TEXT = (
     "Before you click **Create**, set these in the sidebar:",
 )
 # Answers from the Line of effort issue form (.github/ISSUE_TEMPLATE/line-of-effort.yml).
-FORM_ANSWER = re.compile(r"^### (Cadence|Kind)[ \t]*\n+[ \t]*(\S+)[ \t]*$", re.M)
-KINDS = ("admin", "build", "infra", "integration", "report", "service")
+FORM_ANSWER = re.compile(r"^### (Cadence)[ \t]*\n+[ \t]*(\S+)[ \t]*$", re.M)
 BODY_FIELDS = (("Notes", "_context, links_"), ("Doc", None),
                ("Done means", "_what has to exist for this to be finished_"))
 
@@ -962,12 +961,11 @@ def react(comment_id, content="eyes"):
 
 
 def apply_form(iss):
-    """Turn the issue form's Cadence and Kind answers into labels, and leave the placeholder body."""
+    """Turn the issue form's Cadence answer into its label, and leave the placeholder body."""
     answers = {k.lower(): v for k, v in FORM_ANSWER.findall(iss["body"].replace("\r\n", "\n"))}
     if not answers:
         return False
     add = [f"cadence:{answers['cadence']}"] if answers.get("cadence") in RECURRING + ("once", STANDING) else []
-    add += [f"kind:{answers['kind']}"] if answers.get("kind") in KINDS else []
     args = ["issue", "edit", str(iss["number"]), "-R", REPO, "--body", PLACEHOLDER]
     for label in add:
         args += ["--add-label", label]

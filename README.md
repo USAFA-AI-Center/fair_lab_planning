@@ -32,8 +32,8 @@ stays open. Each period is a sub-issue with its own record.
 
 1. Open **New issue → Line of effort**.
 2. Set the title. It becomes the record folder, so settle it now.
-3. Pick **Cadence** (`weekly` to `annual`) and **Kind**.
-4. Set the driver under **Assignees** in the sidebar. Add `area:`, `partner:`, and status labels there if they apply.
+3. Pick **Cadence** (`weekly` to `annual`).
+4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
 5. Click **Create**. The bot labels the issue, puts it on the board as Recurring, and comments the next steps.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every period's record is generated from it.
@@ -62,8 +62,8 @@ For work done once: `once`. The issue closes when its record merges.
 
 1. Open **New issue → Line of effort**.
 2. Set the title. It becomes the record file name, so settle it now.
-3. Pick **Cadence** `once` and **Kind**.
-4. Set the driver under **Assignees** in the sidebar. Add `area:`, `partner:`, and status labels there if they apply.
+3. Pick **Cadence** `once`.
+4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
 5. Click **Create**. The bot labels the issue, puts it on the board as Todo, and comments the next steps.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`.
@@ -81,8 +81,8 @@ discrete change (a rebuild, an incident, a move) is a sub-issue with its own rec
 
 1. Open **New issue → Line of effort**.
 2. Set the title. It becomes the record folder, so settle it now.
-3. Pick **Cadence** `standing` and **Kind**.
-4. Set the driver under **Assignees** in the sidebar. Add `area:`, `partner:`, and status labels there if they apply.
+3. Pick **Cadence** `standing`.
+4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
 5. Click **Create**. The bot labels the issue, puts it on the board as Recurring, and comments the next steps.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every change's record is generated from it.
@@ -136,7 +136,7 @@ Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to De
 | Label | Required | Set by | Options |
 |---|---|---|---|
 | `cadence:` | yes, one | the form's **Cadence** | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`, `standing` |
-| `kind:` | yes, one | the form's **Kind** | `admin`, `build`, `infra`, `integration`, `report`, `service` |
+| `kind:` | if it applies | sidebar | `admin`, `build`, `infra`, `integration`, `report`, `service` |
 | `area:` | if it applies | sidebar | `b200`, `drone`, `fair-llm`, `website` |
 | `partner:` | if it applies | sidebar | the outside party, e.g. `partner:afit` |
 | status | if it applies | sidebar | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` (present the tool at a coaching seminar when it ships) |
