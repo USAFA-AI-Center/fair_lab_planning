@@ -1,7 +1,7 @@
 name: logbook
 on:
   issues:
-    types: [opened, edited, labeled, unlabeled]
+    types: [opened, edited, labeled, unlabeled, deleted]
   issue_comment:
     types: [created]
   # _target: runs main's code with the App credentials. It never checks out the PR branch.

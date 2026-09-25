@@ -423,8 +423,42 @@ def sub_title(parent, period):
 def subs_of(parent):
     pages = json.loads(gh("api", "--paginate", "--slurp",
                           f"repos/{REPO}/issues/{parent['number']}/sub_issues?per_page=100"))
-    return [{"number": s["number"], "url": s["html_url"], "title": s["title"], "state": s["state"]}
+    return [{"number": s["number"], "url": s["html_url"], "title": s["title"], "state": s["state"],
+             "reason": s.get("state_reason"), "body": s.get("body") or ""}
             for page in pages for s in page]
+
+
+SUB_LIST = re.compile(r"^## Sub-issues\n<!-- logbook:sub-issues -->\n.*?<!-- /logbook:sub-issues -->\n?", re.S | re.M)
+
+
+def refresh_sub_list(number, done=()):
+    """Rewrite the parent's "## Sub-issues" section from its sub-issues. `done`: just merged, not yet closed."""
+    parent = load_issue(number)
+    subs = subs_of(parent)
+    if not subs:
+        return
+    lines = []
+    for sub in sorted(subs, key=lambda x: x["number"]):
+        name = sub["title"].removeprefix(parent["title"] + ": ")
+        m = re.search(r"\*\*Record:\*\*\s*`?([^`\s]+)`?", sub["body"])
+        if sub["number"] in done or (sub["state"] == "closed" and sub["reason"] != "not_planned"):
+            link = f" · [record](https://github.com/{REPO}/blob/{BASE}/{quote(m.group(1))})" if m else ""
+            lines.append(f"- #{sub['number']} {name} · done{link}")
+        elif sub["state"] == "closed":
+            lines.append(f"- #{sub['number']} {name} · not planned")
+        else:
+            lines.append(f"- #{sub['number']} {name} · open")
+    block = ("## Sub-issues\n<!-- logbook:sub-issues -->\n_The bot keeps this list._\n\n"
+             + "\n".join(lines) + "\n<!-- /logbook:sub-issues -->\n")
+    body = parent["body"].replace("\r\n", "\n")
+    if SUB_LIST.search(body):
+        new = SUB_LIST.sub(lambda _: block, body, count=1)
+    elif re.search(r"^## Template\s*$", body, re.M):
+        new = re.sub(r"^(## Template\s*)$", lambda m: block + "\n" + m.group(1), body, count=1, flags=re.M)
+    else:
+        new = body.rstrip() + "\n\n" + block
+    if new != body:
+        gh("issue", "edit", str(number), "-R", REPO, "--body", new)
 
 
 def find_sub(parent, period):
@@ -472,6 +506,7 @@ def file_change(iss, login, name):
     if sub:
         return sub["number"], sub["url"], False
     sub = create_sub(iss, f"{today().isoformat()}_{title_slug(name)}", name=name)
+    refresh_sub_list(iss["number"])
     return sub["number"], sub["url"], True
 
 
@@ -490,6 +525,7 @@ def schedule(iss, login, start, count=None, until=None):
         else:
             sub = create_sub(iss, p, due_date(iss["cadence"], p))
             rows.append((p, sub["number"], True, sub["due"]))
+    refresh_sub_list(iss["number"])
     return rows
 
 
@@ -798,6 +834,33 @@ def apply_form(iss):
     return True
 
 
+def remove_from_board(url):
+    item = json.loads(gh("project", "item-add", PROJECT, "--owner", ORG, "--url", url, "--format", "json"))["id"]
+    gh("project", "item-delete", PROJECT, "--owner", ORG, "--id", item)
+
+
+def close_record_pr(number, why):
+    """Close the open record PR for an issue, if any, and delete its branch."""
+    url = open_pr_for(f"record/{number}")
+    if url:
+        gh("pr", "close", url, "-R", REPO, "--delete-branch", "--comment", why)
+
+
+def on_deleted(number):
+    """A deleted issue takes its open record PR with it; a deleted parent, its open sub-issues too."""
+    close_record_pr(number, f"Closing: #{number} was deleted.")
+    subs = json.loads(gh("issue", "list", "-R", REPO, "--label", RECURRENCE_LABEL, "--state", "open",
+                         "--limit", "1000", "--json", "number,body,url"))
+    for sub in subs:
+        if not re.search(rf"\*\*Parent:\*\*\s*#{number}\b", sub["body"] or ""):
+            continue
+        why = f"Closing: its parent #{number} was deleted."
+        close_record_pr(sub["number"], why)
+        remove_from_board(sub["url"])
+        gh("issue", "close", str(sub["number"]), "-R", REPO, "--reason", "not planned", "--comment", why)
+        print(f"closed #{sub['number']}")
+
+
 def on_issue(action, payload):
     iss = load_issue(payload["issue"]["number"])
     if action == "opened" and apply_form(iss):
@@ -911,14 +974,20 @@ def on_pr_closed(payload):
     pr = payload["pull_request"]
     if not pr.get("merged"):
         return
-    for n in sorted({int(x) for x in CLOSES.findall(pr["body"] or "")}):
-        set_board(load_issue(n)["url"], "Done")
+    closed = sorted({int(x) for x in CLOSES.findall(pr["body"] or "")})
+    for n in closed:
+        iss = load_issue(n)
+        set_board(iss["url"], "Done")
+        if iss["parent"]:
+            refresh_sub_list(iss["parent"], done=set(closed))
 
 
 def handle(event, payload):
     number = (payload.get("issue") or payload.get("pull_request") or {}).get("number")
     try:
-        if event == "issues":
+        if event == "issues" and payload["action"] == "deleted":
+            on_deleted(number)
+        elif event == "issues":
             on_issue(payload["action"], payload)
         elif event == "issue_comment" and payload["action"] == "created":
             on_comment(payload)

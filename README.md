@@ -47,6 +47,12 @@ stays open. Each period is a sub-issue with its own record.
 
 `/done` on the parent while any sub-issue is open is refused, with the list of open sub-issues.
 
+The bot keeps a **Sub-issues** list in the parent's body: each period, whether it is open or done,
+and a link to its record. Don't edit it; it is rewritten on every `/schedule` and every merge.
+
+Deleting the parent closes its open sub-issues as not planned, removes them from the board, and
+closes their open record PRs.
+
 Records: `docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/2026-10.md`, one per period,
 and `Closeout.md` at the end.
 
@@ -85,6 +91,8 @@ discrete change (a rebuild, an incident, a move) is a sub-issue with its own rec
 11. Comment `/done` on the PR. The bot merges it. The sub-issue closes and the board marks it Done.
 12. Repeat 8 to 11 for every change.
 13. When the responsibility ends and every sub-issue is closed, comment `/done` on the parent. The bot opens a closeout PR. Fill it in and comment `/done` on the PR. The parent closes.
+
+The bot keeps a **Sub-issues** list in the parent's body, rewritten on every `/change` and every merge.
 
 Records: `docs/B200_Management/2026-09-25_GPU_rebuild.md`, one per change, and `Closeout.md` at
 the end.
