@@ -204,6 +204,12 @@ def owners(iss):
     return who
 
 
+def driver_of(iss):
+    """The driver as the record names them: the assignees (the driver is the assignee in this repo)."""
+    who = owners(iss)
+    return ", ".join("@" + a for a in sorted(who)) if who else iss["driver"] or "unassigned"
+
+
 def require_owner(iss, login, action="act on"):
     allowed = owners(iss)
     if not allowed:
@@ -533,14 +539,14 @@ def record_target(iss, period=None):
         parent = load_issue(iss["parent"])
         period = iss["cycle"] or "cycle"
         text = render(template_for(parent), title=parent["title"], parent=parent["number"],
-                      sub_issue=iss["number"], driver=parent["driver"], period=period,
+                      sub_issue=iss["number"], driver=driver_of(iss), period=period,
                       date=date, issue=iss["number"])
         return dict(closes=iss["number"], refs=parent["number"], path=iss["record"],
                     title=iss["title"], text=text)
     if k == "once":
         sync_doc(iss)
         text = render(template_for(iss), title=iss["title"], issue=iss["number"],
-                      driver=iss["driver"], date=date, parent="", sub_issue="", period="")
+                      driver=driver_of(iss), date=date, parent="", sub_issue="", period="")
         return dict(closes=iss["number"], refs=None, path=iss["doc"], title=iss["title"], text=text)
     if k == "recurring":
         period = period or default_period(iss["cadence"])

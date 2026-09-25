@@ -34,7 +34,8 @@ Open **New issue → Line of effort**.
 
 **Title.** The title becomes the record path. Settle it before the first record.
 
-**Assignee.** The driver. Required: the bot ignores commands from anyone else.
+**Assignee.** The driver. In this repo the assignee is the driver. Required: the bot ignores
+commands from anyone else.
 
 **Labels.**
 
@@ -49,7 +50,6 @@ Open **New issue → Line of effort**.
 **Body.**
 
 ```
-**Driver:** Name
 **Notes:** context, links
 **Doc:** _the bot fills this in_
 **Done means:** what has to exist for this to be finished
@@ -144,6 +144,6 @@ Projects (read/write). Its ID is in the variable `LOGBOOK_APP_ID`, its key in th
 
 ## Board fields
 
-- **Driver** owns the issue
+- **Assignees** the driver
 - **Doc** where its records live; the bot writes it
 - **Priority**, **Target date** set by the driver and the lab lead
