@@ -276,6 +276,15 @@ def default_period(cad, day=None):
     return d.isoformat()
 
 
+def first_period(cad, day=None):
+    """The period a new schedule should start at: this one, or the next when this one ends within 10 days."""
+    d = day or today()
+    p = default_period(cad, d)
+    if (due_date(cad, p) - d).days < 10:
+        p = format_period(cad, *next_period(cad, *parse_period(cad, p)))
+    return p
+
+
 def parse_period(cad, p):
     """Return (year, index) for the cadence, or refuse with the expected format."""
     fmt = {"weekly": r"^(\d{4})-W(\d{2})$",
@@ -542,15 +551,30 @@ def edit_link(branch, path):
     return f"https://github.com/{REPO}/edit/{quote(branch)}/{quote(path)}"
 
 
+def open_pr_for(branch):
+    prs = json.loads(gh("pr", "list", "-R", REPO, "--head", branch, "--state", "open", "--json", "url"))
+    return prs[0]["url"] if prs else None
+
+
 def open_record_pr(t, assignees):
     """Branch, scaffold and PR for a record target. Returns (url, branch, created)."""
     if file_at(t["path"], BASE) is not None:
         raise Refuse(f"`{t['path']}` is already on {BASE}; #{t['closes']} has its record.")
     branch = f"record/{t['closes']}"
-    open_prs = json.loads(gh("pr", "list", "-R", REPO, "--head", branch, "--state", "open",
-                             "--json", "url"))
-    if open_prs:
-        return open_prs[0]["url"], branch, False
+    url = open_pr_for(branch)
+    if url:
+        return url, branch, False
+    try:
+        return create_record_pr(t, assignees, branch), branch, True
+    except SystemExit:
+        # Two /done comments at once: the other run made the branch, file or PR first.
+        url = open_pr_for(branch)
+        if url:
+            return url, branch, False
+        raise
+
+
+def create_record_pr(t, assignees, branch):
     if gh_found("api", f"repos/{REPO}/git/ref/heads/{branch}") is None:
         sha = gh("api", f"repos/{REPO}/git/ref/heads/{BASE}", "--jq", ".object.sha").strip()
         gh("api", "-X", "POST", f"repos/{REPO}/git/refs", "-f", f"ref=refs/heads/{branch}", "-f", f"sha={sha}")
@@ -571,7 +595,7 @@ def open_record_pr(t, assignees):
             "--title", f"Record: {t['title']}", "--body", body]
     for a in sorted(assignees):
         args += ["--assignee", a]
-    return gh(*args).strip(), branch, True
+    return gh(*args).strip()
 
 
 # ------------------------------------------------------------------------- check
@@ -650,7 +674,7 @@ def welcome(iss):
         lines = ["When this period's work is done, comment `/done` here."]
     elif k == "recurring":
         cad = iss["cadence"]
-        span = period_sequence(cad, default_period(cad), EXAMPLE_SPAN[cad])
+        span = period_sequence(cad, first_period(cad), EXAMPLE_SPAN[cad])
         lines = [f"This is a **{cad}** line of effort. Its records go in `{iss['doc']}`.",
                  "",
                  f"1. Comment `/schedule {span[0]} {span[-1]}` to create one sub-issue per period.",
