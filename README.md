@@ -37,8 +37,8 @@ stays open. Each period is a sub-issue with its own record.
 5. Click **Create**. The bot labels the issue, puts it on the board as Recurring, and comments the next steps.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every period's record is generated from it.
-8. Comment `/schedule 2026-10 2027-05`. The bot creates one sub-issue per period, each on the board with its due date. Re-run with a later end to extend.
-   The format depends on the cadence: see [Schedule formats](#schedule-formats).
+8. Comment `/schedule <start date> <how many>`, e.g. `/schedule 2026-10-01 8` for eight months from October. The bot creates one sub-issue per period, each on the board with its due date. Re-run to extend; existing periods are skipped.
+   Examples for every cadence: [Schedule formats](#schedule-formats).
 9. When a period's work is finished, comment `/done` on **that period's sub-issue**. The bot opens a PR and replies with an edit link.
 10. Click the edit link, replace the placeholder text, click **Commit changes**.
 11. Comment `/done` on the PR. The bot merges it. The sub-issue closes and the board marks it Done.
@@ -99,25 +99,28 @@ the end.
 
 ## Schedule formats
 
-`/schedule <first> <last>` creates every period from first to last, inclusive. Use the format for
-the issue's cadence. `/schedule <first>` alone creates one period.
+`/schedule <start date> <how many>`. The start date is any day: the bot starts at the week, month,
+quarter, semester, or year that contains it. `next` instead of a date starts at the next period.
 
-| Cadence | Period format | Example | Creates | Each period is due |
-|---|---|---|---|---|
-| `weekly` | `YYYY-Www` (ISO week) | `/schedule 2026-W40 2026-W52` | 13 sub-issues, Sep 28 2026 to Dec 27 2026 | Sunday |
-| `monthly` | `YYYY-MM` | `/schedule 2026-10 2027-05` | 8 sub-issues, Oct 2026 to May 2027 | last day of the month |
-| `quarterly` | `YYYY-Qn` | `/schedule 2026-Q4 2027-Q3` | 4 sub-issues | last day of the quarter |
-| `semester` | `YYYY-fall` or `YYYY-spring` | `/schedule 2026-fall 2028-spring` | 4 sub-issues | Dec 15 (fall), May 15 (spring) |
-| `annual` | `YYYY` | `/schedule 2026 2028` | 3 sub-issues | Dec 31 |
+| Cadence | Example | Creates | Each period is due |
+|---|---|---|---|
+| `weekly` | `/schedule 2026-09-28 5` | 5 weeks, Sep 28 to Nov 1 2026 | Sunday |
+| `monthly` | `/schedule 2026-10-01 8` | 8 months, Oct 2026 to May 2027 | last day of the month |
+| `quarterly` | `/schedule 2026-10-01 4` | 4 quarters, Oct 2026 to Sep 2027 | last day of the quarter |
+| `semester` | `/schedule 2026-08-01 4` | 4 semesters, fall 2026 to spring 2028 | Dec 15 (fall), May 15 (spring) |
+| `annual` | `/schedule 2026-01-01 3` | 3 years, 2026 to 2028 | Dec 31 |
+| any | `/schedule next 5` | the next 5 periods | |
 
-A period in the wrong format is refused with an example of the right one.
+Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to Dec) and spring
+(Jan to Jun). Sub-issues and records are named by period: `2026-W40`, `2026-10`, `2026-Q4`,
+`2026-fall`, `2026`.
 
 ## Commands
 
 | Where | Comment | Does |
 |---|---|---|
 | any issue but a sub-issue | `/template` | fills in the body and the record template |
-| recurring issue | `/schedule <first> [<last>]` | creates the sub-issues; re-run to extend |
+| recurring issue | `/schedule <start date> <how many>` | creates the sub-issues; re-run to extend |
 | standing issue | `/change <short name>` | files one change as a sub-issue |
 | one-off issue or sub-issue | `/done` | opens the record PR |
 | recurring or standing issue | `/done` | once every sub-issue is closed, opens the closeout PR |
@@ -158,7 +161,7 @@ Every PR runs `check`. A PR that closes an issue must add that issue's record, w
 locally as you:
 
 ```
-bin/logbook schedule <issue#> --start <period> (--count N | --until <period>)
+bin/logbook schedule <issue#> --start <date|period> (--count N | --until <date|period>)
 bin/logbook template <issue#> [--set]
 bin/logbook doc <issue#> [--set]
 bin/logbook check [--pr <PR#>]

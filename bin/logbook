@@ -8,7 +8,7 @@ People drive it with comments; the bot workflow runs `logbook handle`:
 
   on a new issue          writes its Doc line, puts it on the board, and posts
                           the commands that apply to it
-  /schedule <first> [<last>]
+  /schedule <start date> <how many>
                           on a recurring issue: one sub-issue per period, each
                           on the board as Todo with its due date as Target date.
                           Existing periods are skipped, so re-running is safe.
@@ -299,6 +299,48 @@ def first_period(cad, day=None):
     return p
 
 
+def period_start(cad, p):
+    """The first day of a period."""
+    y, i = parse_period(cad, p)
+    if cad == "weekly":
+        return dt.date.fromisocalendar(y, i, 1)
+    if cad == "monthly":
+        return dt.date(y, i, 1)
+    if cad == "quarterly":
+        return dt.date(y, i * 3 - 2, 1)
+    if cad == "semester":
+        return dt.date(y, 1 if i == 0 else 7, 1)
+    return dt.date(y, 1, 1)
+
+
+def to_period(cad, token):
+    """A period from what a person types: a date (the period containing it), `next`, or a period."""
+    if token.lower() == "next":
+        return format_period(cad, *next_period(cad, *parse_period(cad, default_period(cad))))
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", token):
+        try:
+            return default_period(cad, dt.date.fromisoformat(token))
+        except ValueError:
+            raise Refuse(f"`{token}` is not a real date.")
+    parse_period(cad, token)
+    return token
+
+
+def schedule_args(cad, args):
+    """(start, count, until) from `/schedule <start> [<count> | <last>]`."""
+    if not args or len(args) > 2:
+        raise Refuse("Usage: `/schedule <start date> <how many>`, e.g. `/schedule 2026-10-01 8`, "
+                     "or `/schedule next 5`.")
+    start = to_period(cad, args[0])
+    if len(args) == 1:
+        return start, 1, None
+    if args[1].isdigit() and int(args[1]) <= MAX_PERIODS:
+        if int(args[1]) < 1:
+            raise Refuse("The count must be at least 1.")
+        return start, int(args[1]), None
+    return start, None, to_period(cad, args[1])
+
+
 def parse_period(cad, p):
     """Return (year, index) for the cadence, or refuse with the expected format."""
     fmt = {"weekly": r"^(\d{4})-W(\d{2})$",
@@ -311,7 +353,8 @@ def parse_period(cad, p):
     if not m:
         example = {"weekly": "2026-W40", "monthly": "2026-10", "quarterly": "2026-Q4",
                    "semester": "2026-fall", "annual": "2026"}[cad]
-        raise Refuse(f"period `{p}` does not match the {cad} format, e.g. `{example}`.")
+        raise Refuse(f"`{p}` is not a date or a {cad} period. Use a date like `2026-10-01`, "
+                     f"`next`, or a period like `{example}`.")
     y = int(m.group(1))
     if cad == "weekly":
         i = int(m.group(2))
@@ -752,7 +795,7 @@ HELP = """\
 
 | Where | Comment | What happens |
 |---|---|---|
-| recurring issue | `/schedule <first> [<last>]` | one sub-issue per period, e.g. `/schedule 2026-10 2027-05` |
+| recurring issue | `/schedule <start date> <how many>` | one sub-issue per period, e.g. `/schedule 2026-10-01 8` or `/schedule next 5` |
 | one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
 | recurring or standing issue | `/done` | every sub-issue is closed: the bot opens the closeout record PR |
 | standing issue | `/change <short name>` | files one change as a sub-issue |
@@ -768,10 +811,11 @@ def welcome(iss):
         lines = ["When this period's work is done, comment `/done` here."]
     elif k == "recurring":
         cad = iss["cadence"]
-        span = period_sequence(cad, first_period(cad), EXAMPLE_SPAN[cad])
+        first = first_period(cad)
         lines = [f"This is a **{cad}** line of effort. Its records go in `{iss['doc']}`.",
                  "",
-                 f"1. Comment `/schedule {span[0]} {span[-1]}` to create one sub-issue per period.",
+                 f"1. Comment `/schedule {period_start(cad, first)} {EXAMPLE_SPAN[cad]}` to create "
+                 f"{EXAMPLE_SPAN[cad]} sub-issues, one per period (a start date and how many).",
                  "2. When a period's work is done, comment `/done` on that sub-issue.",
                  "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR.",
                  "4. When the line of effort ends and every sub-issue is closed, comment `/done` here."]
@@ -887,10 +931,10 @@ def on_issue(action, payload):
 
 def issue_command(iss, login, cmd, args):
     if cmd == "/schedule":
-        if not args:
-            raise Refuse("Usage: `/schedule <first> [<last>]`, e.g. `/schedule 2026-10 2027-05`.")
-        rows = schedule(iss, login, args[0], count=None if len(args) > 1 else 1,
-                        until=args[1] if len(args) > 1 else None)
+        if kind(iss) != "recurring":
+            raise Refuse(f"#{iss['number']} is not a recurring issue; `/schedule` needs a "
+                         f"`cadence:` label of {', '.join(RECURRING)}.")
+        rows = schedule(iss, login, *schedule_args(iss["cadence"], args))
         table = "\n".join(f"| {p} | #{n} | {'created' if c else 'already existed'} | {d} |"
                           for p, n, c, d in rows)
         return ("| Period | Sub-issue | | Due |\n|---|---|---|---|\n" + table +
@@ -1032,7 +1076,10 @@ def cmd_template(a):
 
 def cmd_schedule(a):
     iss = load_issue(a.issue)
-    rows = schedule(iss, me(), a.start, a.count, a.until)
+    if kind(iss) != "recurring":
+        sys.exit(f"#{iss['number']} is not a recurring issue.")
+    start = to_period(iss["cadence"], a.start)
+    rows = schedule(iss, me(), start, a.count, to_period(iss["cadence"], a.until) if a.until else None)
     print(f"#{iss['number']} {iss['title']} ({iss['cadence']}): {len(rows)} periods")
     for p, n, created, due in rows:
         print(f"  {p:<12} #{n:<4} {'created, due ' + str(due) if created else 'exists'}")
