@@ -6,13 +6,13 @@
 
 ## What was done
 
-Two to five sentences. What exists now that did not before.
+Ran the logbook bot end to end: issue, /done, bot-opened PR, record, /done, merge.
 
 ## Evidence
 
-Links: the deployed thing, the document delivered, the email sent, the repo, the photo.
-Anything a reader can open to confirm the work.
+Issue #37 and PR #38.
 
 ## Follow-ups filed
 
-- #NN <title> (or "none")
+- none
+
