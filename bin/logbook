@@ -13,9 +13,11 @@ People drive it with comments; the bot workflow runs `logbook handle`:
                           on the board as Todo with its due date as Target date.
                           Existing periods are skipped, so re-running is safe.
   /change <short name>    on a standing issue: file one change as a sub-issue
-  /done [<period>]        on a one-off issue or a recurrence sub-issue, when the
-                          work is finished: open the record PR from the issue's
-                          template and reply with a link to write it
+  /done                   on a one-off issue or a sub-issue, when the work is
+                          finished: open the record PR from the issue's template
+                          and reply with a link to write it. On a recurring or
+                          standing parent, once every sub-issue is closed: open
+                          its closeout record, which closes the parent
   /done                   on a record PR, when the record is written: check it
                           and merge it (or merge as soon as the check passes)
   /template               write the effective template into the issue body as a
@@ -70,6 +72,7 @@ TZ = zoneinfo.ZoneInfo("America/Denver")
 RECURRENCE_LABEL = "recurrence"
 RECURRING = ("weekly", "monthly", "quarterly", "semester", "annual")
 STANDING = "standing"
+CLOSEOUT = "Closeout.md"  # the record that closes a recurring or standing parent
 MAX_PERIODS = 520
 SCAFFOLD_MSG = "logbook: scaffold record for #"
 CLOSES = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)")
@@ -417,12 +420,16 @@ def sub_title(parent, period):
     return f"{parent['title']}: {period}"
 
 
+def subs_of(parent):
+    pages = json.loads(gh("api", "--paginate", "--slurp",
+                          f"repos/{REPO}/issues/{parent['number']}/sub_issues?per_page=100"))
+    return [{"number": s["number"], "url": s["html_url"], "title": s["title"], "state": s["state"]}
+            for page in pages for s in page]
+
+
 def find_sub(parent, period):
     title = sub_title(parent, period)
-    subs = json.loads(gh("api", "--paginate", "--slurp",
-                         f"repos/{REPO}/issues/{parent['number']}/sub_issues?per_page=100"))
-    return next(({"number": s["number"], "url": s["html_url"]}
-                 for page in subs for s in page if s["title"] == title), None)
+    return next((s for s in subs_of(parent) if s["title"] == title), None)
 
 
 def ensure_label():
@@ -552,7 +559,7 @@ def set_template(iss, login, source_text=None):
 
 
 # ----------------------------------------------------------------------- records
-def record_target(iss, period=None):
+def record_target(iss):
     """What a record for this issue closes, where it goes, and its rendered text."""
     k = kind(iss)
     date = today().isoformat()
@@ -571,17 +578,20 @@ def record_target(iss, period=None):
         text = render(template_for(iss), title=iss["title"], issue=iss["number"],
                       driver=driver_of(iss), date=date, parent="", sub_issue="", period="")
         return dict(closes=iss["number"], refs=None, path=iss["doc"], title=iss["title"], text=text)
-    if k == "recurring":
-        period = period or default_period(iss["cadence"])
-        parse_period(iss["cadence"], period)
-        sub = find_sub(iss, period)
-        if sub is None:
-            raise Refuse(f"#{iss['number']} has no sub-issue for {period}. "
-                         f"Comment `/schedule {period}` to create it.")
-        return record_target(load_issue(sub["number"]))
-    if k == "standing":
-        raise Refuse(f"#{iss['number']} is a standing responsibility. Comment `/change <short name>` "
-                     "to file the change as a sub-issue, then comment `/done` on that.")
+    if k in ("recurring", "standing"):
+        # A parent closes only after every sub-issue has, with a closeout record of its own.
+        still = [s for s in subs_of(iss) if s["state"] == "open"]
+        if still:
+            listed = "\n".join(f"- #{s['number']} {s['title']}" for s in still[:10])
+            more = f"\n- and {len(still) - 10} more" if len(still) > 10 else ""
+            raise Refuse(f"#{iss['number']} still has {len(still)} open sub-issue(s):\n\n{listed}{more}\n\n"
+                         "Comment `/done` on each sub-issue when its work is done. When every one is "
+                         "closed, `/done` here opens the closeout record that closes this issue.")
+        sync_doc(iss)
+        text = render((DEFAULT_COMPLETION, "built-in closeout"), title=f"{iss['title']}: closeout",
+                      issue=iss["number"], driver=driver_of(iss), date=date, parent="", sub_issue="", period="")
+        return dict(closes=iss["number"], refs=None, path=iss["doc"] + CLOSEOUT,
+                    title=f"{iss['title']}: closeout", text=text)
     raise Refuse(f"#{iss['number']} has no `cadence:` label. Add one first.")
 
 
@@ -634,9 +644,9 @@ def create_record_pr(t, assignees, branch):
     lines = [f"Closes #{t['closes']}"] + ([f"Refs #{t['refs']}"] if t["refs"] else [])
     body = "\n".join(lines + [
         "",
-        f"**Write the record:** [edit `{t['path']}`]({edit_link(branch, t['path'])})",
+        f"**Fill in the template:** [edit `{t['path']}`]({edit_link(branch, t['path'])})",
         "",
-        "When it is written, comment `/done` on this PR and the bot merges it. "
+        "When it is filled in, comment `/done` on this PR and the bot merges it. "
         "To work locally instead: `git fetch origin && git switch " + branch + "`, edit, push.",
     ])
     args = ["pr", "create", "-R", REPO, "--head", branch, "--base", BASE,
@@ -665,11 +675,11 @@ def lint_tree():
 
 
 def record_path(iss):
-    """The one file a PR closing this issue must add, or None for a recurring parent."""
+    """The one file a PR closing this issue must add."""
     if iss["record"]:
         return iss["record"]
-    if iss["doc"] and not is_living(iss):
-        return iss["doc"]
+    if iss["doc"]:
+        return iss["doc"] + CLOSEOUT if is_living(iss) else iss["doc"]
     return None
 
 
@@ -687,8 +697,7 @@ def pr_problems(number):
         iss = load_issue(n)
         want = record_path(iss)
         if want is None:
-            problems.append(f"closes #{n}, which has no record path "
-                            "(a recurring parent never closes; close its sub-issue instead)")
+            problems.append(f"closes #{n}, which has no **Doc:** line")
             continue
         if want not in files:
             problems.append(f"closes #{n} but does not add `{want}`")
@@ -709,9 +718,9 @@ HELP = """\
 |---|---|---|
 | recurring issue | `/schedule <first> [<last>]` | one sub-issue per period, e.g. `/schedule 2026-10 2027-05` |
 | one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
-| recurring issue | `/done <period>` | the same, for that period's sub-issue |
+| recurring or standing issue | `/done` | every sub-issue is closed: the bot opens the closeout record PR |
 | standing issue | `/change <short name>` | files one change as a sub-issue |
-| one-off or recurring issue | `/template` | copies the record template into the issue body to edit |
+| any issue but a sub-issue | `/template` | fills in the body and the record template |
 | record PR | `/done` | the record is written: the bot checks it and merges it |
 | anywhere | `/help` | this list |
 """
@@ -728,7 +737,8 @@ def welcome(iss):
                  "",
                  f"1. Comment `/schedule {span[0]} {span[-1]}` to create one sub-issue per period.",
                  "2. When a period's work is done, comment `/done` on that sub-issue.",
-                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
+                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR.",
+                 "4. When the line of effort ends and every sub-issue is closed, comment `/done` here."]
     elif k == "once":
         lines = [f"This is a one-off. Its record goes in `{iss['doc']}`.",
                  "",
@@ -739,7 +749,8 @@ def welcome(iss):
                  "",
                  "1. For each discrete change, comment `/change <short name>`, e.g. `/change GPU rebuild`.",
                  "2. When the change is done, comment `/done` on the sub-issue the bot files.",
-                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
+                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR.",
+                 "4. When the responsibility ends and every sub-issue is closed, comment `/done` here."]
     else:
         lines = ["This issue has no `cadence:` label. Add one (`cadence:once`, `cadence:monthly`, "
                  f"`cadence:{STANDING}`, ...) and the bot sets up its records."]
@@ -828,12 +839,14 @@ def issue_command(iss, login, cmd, args):
         return (f"{'Filed' if created else 'Already filed:'} #{n}. "
                 "When the change is done, comment `/done` there.")
     if cmd == "/done":
+        if args:
+            raise Refuse("`/done` takes no arguments. For one period, comment `/done` on that period's sub-issue.")
         require_owner(iss, login, "record")
-        t = record_target(iss, args[0] if args else None)
+        t = record_target(iss)
         target = load_issue(t["closes"]) if t["closes"] != iss["number"] else iss
         url, branch, created = open_record_pr(t, owners(target))
         verb = "Opened" if created else "The record PR is already open:"
-        return (f"{verb} {url}\n\n**Write the record:** [edit `{t['path']}`]({edit_link(branch, t['path'])})"
+        return (f"{verb} {url}\n\n**Fill in the template:** [edit `{t['path']}`]({edit_link(branch, t['path'])})"
                 "\n\nThen comment `/done` on the PR.")
     if cmd == "/template":
         if kind(iss) == "sub":
