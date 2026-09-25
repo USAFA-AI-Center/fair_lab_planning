@@ -13,21 +13,58 @@ All work tracking will be contained within the `docs/` directory.
 ## How it works
 
 A bot, `fair-logbook`, runs everything from issue and PR comments. Never close an issue by hand.
-The bot closes it when it merges the issue's record into `docs/`.
+The bot closes it when it merges the issue's record into `docs/`. A record is the write-up of
+the finished work (markdown file generated from the issue's template).
 
-You do three things:
+**You do three things**:
 
-1. Write the issue. Add a `cadence:` label and assign the driver.
-2. Write the record in the PR the bot opens.
+1. Write the issue (see below).
+2. Fill in the template on the PR the bot opens. Click the edit link, replace the placeholder text, click **Commit changes**.
 3. Comment `/done` to hand each step back to the bot.
 
-Only an assignee can run commands. Add a second assignee to cover for the driver.
+**Who can run commands.** Only the issue's assignees. The assignee list (right sidebar,
+**Assignees**) is how the bot knows who the driver is. A command from anyone else gets a reply
+naming who can run it, and nothing happens. On a sub-issue, the parent's assignees count too, so
+assigning the driver on the parent covers every period. To let someone cover for the driver, add
+them as a second assignee. `/help` works for anyone.
+
+## Writing an issue
+
+Open **New issue → Line of effort**.
+
+**Title.** The title becomes the record path. Settle it before the first record.
+
+**Assignee.** The driver. Required: the bot ignores commands from anyone else.
+
+**Labels.**
+
+| Label | Required | Options |
+|---|---|---|
+| `cadence:` | yes, one | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual` |
+| `kind:` | yes, one | `admin`, `build`, `infra`, `integration`, `report`, `service` |
+| `area:` | if it applies | `b200`, `drone`, `fair-llm`, `website` |
+| `partner:` | if it applies | the outside party, e.g. `partner:afit` |
+| status | if it applies | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` |
+
+**Body.**
+
+```
+**Driver:** Name
+**Notes:** context, links
+**Doc:** _the bot fills this in_
+**Done means:** what has to exist for this to be finished
+```
+
+**Record template (optional).** Comment `/template` on the issue. The bot adds the default
+template to the issue body, required fields already in place. Edit its sections to fit the work.
+Every record for this issue is generated from it. Leave the `**Issue:**` line and the `{{...}}`
+fields as they are. Skip this and the bot uses the default.
 
 ## One-off work (`cadence:once`)
 
 1. Write the issue.
 2. When the work is finished, comment `/done` on the issue. The bot opens a PR and replies with an edit link.
-3. Write the record.
+3. Fill in the template on the PR: click the edit link, replace the placeholder text, click **Commit changes**.
 4. Comment `/done` on the PR. The bot merges it, closes the issue, and marks it Done.
 
 Record: `docs/Make_FAIR_Lab_logo.md` (the issue title, spaces as underscores).
@@ -39,7 +76,7 @@ The parent issue never closes. Each period is a sub-issue with its own record.
 1. Write the parent issue.
 2. Comment `/schedule 2026-10 2027-05` on the parent. The bot creates one sub-issue per period, with due dates on the board.
 3. When a period's work is finished, comment `/done` on its sub-issue.
-4. Write the record, then comment `/done` on the PR.
+4. Fill in the template on the PR, then comment `/done` on the PR.
 
 Records: `docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/2026-10.md`, one per period.
 
@@ -52,17 +89,15 @@ Periods: `2026-W40`, `2026-10`, `2026-Q4`, `2026-fall` / `2027-spring`, `2026`.
 | recurring issue | `/schedule <first> [<last>]` | creates the sub-issues; re-run to extend |
 | one-off issue or sub-issue | `/done` | opens the record PR |
 | recurring issue | `/done <period>` | opens that period's record PR |
-| any issue | `/template` | copies the record template into the issue to edit |
+| one-off or recurring issue | `/template` | copies the record template into the issue to edit |
 | record PR | `/done` | checks the record and merges it |
 | anywhere | `/help` | lists the commands |
 
 ## Templates
 
-A record is generated from the `## Template` block in the issue body. A sub-issue uses its
-parent's. `**Template:** #N` borrows another issue's block. With neither, the bot uses a default.
-
-Comment `/template` to copy the template into the issue, then edit it there. Keep the
-`**Issue:** #N` line.
+A record is generated from the `## Template` block in the issue body, added by `/template`. A
+sub-issue uses its parent's. `**Template:** #N` in the body borrows another issue's template. With
+neither, the bot uses the default.
 
 ## The check
 

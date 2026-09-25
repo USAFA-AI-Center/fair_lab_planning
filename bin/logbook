@@ -662,7 +662,7 @@ HELP = """\
 | recurring issue | `/schedule <first> [<last>]` | one sub-issue per period, e.g. `/schedule 2026-10 2027-05` |
 | one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
 | recurring issue | `/done <period>` | the same, for that period's sub-issue |
-| any issue | `/template` | copies the record template into the issue body to edit |
+| one-off or recurring issue | `/template` | copies the record template into the issue body to edit |
 | record PR | `/done` | the record is written: the bot checks it and merges it |
 | anywhere | `/help` | this list |
 """
@@ -740,6 +740,16 @@ def issue_command(iss, login, cmd, args):
         return (f"{verb} {url}\n\n**Write the record:** [edit `{t['path']}`]({edit_link(branch, t['path'])})"
                 "\n\nThen comment `/done` on the PR.")
     if cmd == "/template":
+        if kind(iss) == "sub":
+            if not iss["parent"]:
+                raise Refuse("This sub-issue has no **Parent:** line, so it has no template to use.")
+            parent = load_issue(iss["parent"])
+            _, source = template_for(parent)
+            where = (f"#{parent['number']} has one ({source}); edit it there."
+                     if parent["template_text"] or parent["template_ref"] else
+                     f"#{parent['number']} has none yet, so the default is used. "
+                     f"Comment `/template` on #{parent['number']} to add it.")
+            raise Refuse("A sub-issue's records use its parent's template, so nothing is added here. " + where)
         what = set_template(iss, login)
         return (f"## Template block {what} in this issue's body. Edit it there; "
                 "every record opened after that follows it.")
