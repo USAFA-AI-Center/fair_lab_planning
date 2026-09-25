@@ -79,24 +79,24 @@ DEFAULT_RECORD = """\
 
 - **Issue:** #{{sub_issue}} (recurrence of #{{parent}})
 - **Driver:** {{driver}}
-- **Cycle:** {{period}}
+- **Period:** {{period}}
 - **Recorded:** {{date}}
 
 ## What happened
 
-Two to five sentences.
+_Two to five sentences._
 
 ## Who was involved
 
-Attendees, recipients, or the department engaged.
+_Attendees, recipients, or the department engaged._
 
 ## What changed as a result
 
-Decisions made, requests received, follow-ups filed (issue numbers).
+_Decisions made and requests received. List any new issues by number, e.g. #45._
 
 ## Next time
 
-What to do differently in the next cycle.
+_What to do differently next period, or "nothing"._
 """
 
 DEFAULT_COMPLETION = """\
@@ -108,16 +108,17 @@ DEFAULT_COMPLETION = """\
 
 ## What was done
 
-Two to five sentences. What exists now that did not before.
+_Two to five sentences: what exists now that did not before._
 
 ## Evidence
 
-Links: the deployed thing, the document delivered, the email sent, the repo, the photo.
-Anything a reader can open to confirm the work.
+_Links anyone can open to confirm the work: the repo, the deployed site, the document, the email, a photo._
 
 ## Follow-ups filed
 
-- #NN <title> (or "none")
+_New issues this work turned up, one per line, or "none". For example:_
+
+- #45 Add a dark-mode version of the logo
 """
 
 TEMPLATE_BLOCK = re.compile(r"^## Template\s*\n(`{3,})[a-z]*\n(.*?)\n\1[ \t]*$", re.S | re.M)
