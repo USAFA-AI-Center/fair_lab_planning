@@ -1,0 +1,25 @@
+name: Line of effort
+description: A new line of effort for the FAIR Lab board
+labels: [needs-scope]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you click Create:** set the driver under **Assignees** in the sidebar. The bot only takes commands from assignees. Add `area:`, `partner:`, and status labels there too if they apply.
+
+        **After you create the issue:** comment `/template`. The bot fills in the body.
+  - type: dropdown
+    id: cadence
+    attributes:
+      label: Cadence
+      description: "`once` closes when done. `weekly` to `annual` get one sub-issue per period. `standing` never closes; each change is filed with `/change`."
+      options: [once, weekly, monthly, quarterly, semester, annual, standing]
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options: [admin, build, infra, integration, report, service]
+    validations:
+      required: true

@@ -31,8 +31,8 @@ them as a second assignee. `/help` works for anyone.
 ## Writing an issue
 
 1. Open **New issue → Line of effort**.
-2. Set the title, the assignee, and the labels. Leave the body as it is.
-3. Click **Create**.
+2. Set the title. Pick **Cadence** and **Kind**. Set the driver under **Assignees** in the sidebar.
+3. Click **Create**. The bot turns Cadence and Kind into labels.
 4. Comment `/template`. The bot fills in the body.
 5. Edit the body: **Notes**, **Done means**, and the record template under `## Template`.
 
@@ -45,9 +45,9 @@ commands from anyone else.
 
 | Label | Required | Options |
 |---|---|---|
-| `cadence:` | yes, one | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`, `standing` |
-| `kind:` | yes, one | `admin`, `build`, `infra`, `integration`, `report`, `service` |
-| `area:` | if it applies | `b200`, `drone`, `fair-llm`, `website` |
+| `cadence:` | yes, one: the form's **Cadence** | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`, `standing` |
+| `kind:` | yes, one: the form's **Kind** | `admin`, `build`, `infra`, `integration`, `report`, `service` |
+| `area:` | if it applies, in the sidebar | `b200`, `drone`, `fair-llm`, `website` |
 | `partner:` | if it applies | the outside party, e.g. `partner:afit` |
 | status | if it applies | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` |
 

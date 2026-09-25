@@ -511,21 +511,16 @@ def render(template, **fields):
     return text
 
 
-# What the Line of effort issue template puts in the body (.github/ISSUE_TEMPLATE/line-of-effort.md
-# is written from it); /template removes it.
-BLANK_BODY = "Leave this body blank. Create the issue, then comment `/template` and the bot fills it in."
-NEW_ISSUE_BODY = f"""\
-{BLANK_BODY}
-
-Before you click **Create**, set these in the sidebar:
-
-- **Assignees:** the driver. The bot only takes commands from assignees.
-- **Labels,** required: exactly one `cadence:` (`once`, `weekly`, `monthly`, `quarterly`, `semester`,
-  `annual`, `standing`) and exactly one `kind:` (`admin`, `build`, `infra`, `integration`, `report`,
-  `service`).
-- **Labels,** if they apply: `area:`, `partner:`, `needs-scope`, `needs-external-help`, `blocked`,
-  `faculty-lecture`.
-"""
+# The body the bot leaves on a new issue for /template to replace, and the text of the earlier
+# Markdown issue template, which issues opened before the form still carry.
+PLACEHOLDER = "Comment `/template` and the bot fills in this body."
+OLD_TEMPLATE_TEXT = (
+    "Leave this body blank. Create the issue, then comment `/template` and the bot fills it in.",
+    "Before you click **Create**, set these in the sidebar:",
+)
+# Answers from the Line of effort issue form (.github/ISSUE_TEMPLATE/line-of-effort.yml).
+FORM_ANSWER = re.compile(r"^### (Cadence|Kind)[ \t]*\n+[ \t]*(\S+)[ \t]*$", re.M)
+KINDS = ("admin", "build", "infra", "integration", "report", "service")
 BODY_FIELDS = (("Notes", "_context, links_"), ("Doc", None),
                ("Done means", "_what has to exist for this to be finished_"))
 
@@ -538,8 +533,10 @@ def set_template(iss, login, source_text=None):
     fence = "````" if "```" in text else "```"
     block = f"## Template\n{fence}markdown\n{text.rstrip()}\n{fence}"
     what = "replaced" if TEMPLATE_BLOCK.search(iss["body"]) else "added"
-    rest = TEMPLATE_BLOCK.sub("", iss["body"].replace("\r\n", "\n").replace(NEW_ISSUE_BODY.strip(), "")
-                             .replace(BLANK_BODY, ""))
+    rest = TEMPLATE_BLOCK.sub("", iss["body"].replace("\r\n", "\n").replace(PLACEHOLDER, ""))
+    if OLD_TEMPLATE_TEXT[0] in rest:
+        # The old template's text ran from its first line to its last label bullet.
+        rest = re.sub(re.escape(OLD_TEMPLATE_TEXT[0]) + r".*?`faculty-lecture`\.", "", rest, flags=re.S)
     fields = []
     for name, placeholder in BODY_FIELDS:
         pat = re.compile(rf"^\*\*{name}:\*\*[ \t]*(.*)$", re.M)
@@ -775,8 +772,24 @@ def react(comment_id, content="eyes"):
        "-f", f"content={content}", ok=(0, 1))
 
 
+def apply_form(iss):
+    """Turn the issue form's Cadence and Kind answers into labels, and leave the placeholder body."""
+    answers = {k.lower(): v for k, v in FORM_ANSWER.findall(iss["body"].replace("\r\n", "\n"))}
+    if not answers:
+        return False
+    add = [f"cadence:{answers['cadence']}"] if answers.get("cadence") in RECURRING + ("once", STANDING) else []
+    add += [f"kind:{answers['kind']}"] if answers.get("kind") in KINDS else []
+    args = ["issue", "edit", str(iss["number"]), "-R", REPO, "--body", PLACEHOLDER]
+    for label in add:
+        args += ["--add-label", label]
+    gh(*args)
+    return True
+
+
 def on_issue(action, payload):
     iss = load_issue(payload["issue"]["number"])
+    if action == "opened" and apply_form(iss):
+        iss = load_issue(iss["number"])
     if kind(iss) == "sub":
         if action == "opened":
             set_board(iss["url"], "Todo")
