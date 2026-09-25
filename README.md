@@ -12,123 +12,111 @@ All work tracking will be contained within the `docs/` directory.
 
 ## How we complete and track work
 
-Issues are NEVER closed through [the project board](https://github.com/orgs/USAFA-AI-Center/projects/3). We will close ALL issues PROGRAMATICALLY. 
+Everything happens on GitHub, in issue and PR comments. A bot (the `logbook` GitHub App) does the
+rest. Issues are NEVER closed by hand or through
+[the project board](https://github.com/orgs/USAFA-AI-Center/projects/3): the bot closes them by
+merging the PR that adds the issue's record to `docs/`, so every Done has a write-up behind it.
 
-Issues will be marked as DONE when a pull request (tied to the issue) is closed. The PR adds the appropriate docuemntation to `docs/`.
+Only three things are ever done by a person:
 
-## Two Task Types
-### (`cadence:once`): a completion record
+1. **Write the issue.** Give it a `cadence:` label and assign the driver.
+2. **Write the record** in the PR the bot opens.
+3. **Comment `/done`** to hand each step back to the bot.
 
-One markdown file at the path in the issue's **Doc** line. The path is the
-issue's exact title with spaces as underscores (path-unsafe characters dropped):
+### One-off work (`cadence:once`)
+
+1. Write the issue. The bot adds its record path, puts it on the board as Todo, and comments
+   with the next step.
+2. When the work is finished, comment `/done` on the issue. The bot opens a PR with the record
+   file generated from the issue's template and replies with a link to edit it.
+3. Write the record: click the link, or pull the branch, edit, and push.
+4. Comment `/done` on the PR. The bot checks the record, merges it, the issue closes, and the
+   board moves it to Done.
+
+The record is one file named after the issue's exact title, spaces as underscores:
 
 ```
 docs/Make_FAIR_Lab_logo.md
 ```
 
-Run `bin/logbook record <issue#>` to generate it with the header filled in, write it, open a PR
-whose description says `Closes #NN`. Merge closes the issue.
+### Recurring work (`cadence:weekly` / `monthly` / `quarterly` / `semester` / `annual`)
 
-### Recurring work and standing responsibilities: a living document
+The parent issue never closes. Each period is a sub-issue, and each sub-issue closes with its
+own dated record.
 
-The parent issue never closes. Its documentation is a folder named the same way:
+1. Write the parent issue. The bot adds its record folder, puts it on the board as Recurring,
+   and comments with the next step.
+2. Comment `/schedule 2026-10 2027-05` on the parent. The bot creates one sub-issue per period,
+   each on the board as Todo with its due date as the Target date. Run it again with a later end
+   to extend; existing periods are skipped.
+3. When a period's work is finished, comment `/done` on that period's sub-issue (or
+   `/done 2026-10` on the parent). Only that period gets a PR.
+4. Write the record, then comment `/done` on the PR, as above.
 
 ```
 docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/
-  2026-10.md       one dated record per recurrence
+  2026-10.md       one dated record per period
   2026-11.md
 ```
 
-Each recurrence is a sub-issue of the parent (use the "Recurrence" issue template). The PR
-that adds the dated record says `Closes #<sub-issue>` and `Refs #<parent>`. The parent's
-"Sub-issues progress" column on the board is the completion tracker.
+The parent's "Sub-issues progress" column on the board is the completion tracker.
 
-### One-off work whose output keeps changing
+Period formats: weekly `2026-W40`, monthly `2026-10`, quarterly `2026-Q4`, semester
+`2026-fall` / `2027-spring`, annual `2026`.
 
-Some one-off issues produce a document that will be revised later (a runbook, a
-recommendation). Treat them as living documents from the start: the issue closes when the
-first version merges, and later revisions are PRs that say `Refs #NN`.
+### Commands
 
-## PR keywords
+Only an assignee of the issue (for a sub-issue, of it or its parent) can run these. Add a second
+assignee when someone needs to cover for the driver. The bot reacts with 👀 when it sees a
+command and replies with the result.
 
-| Keyword | Effect | Use it when |
+| Where | Comment | What happens |
 |---|---|---|
-| `Closes #NN` | merging closes issue NN and moves it to Done | the PR is the completion record, or the dated record for a recurrence sub-issue |
-| `Refs #NN` | links the PR to issue NN, nothing closes | any partial progress, or a later revision of a document that already closed its issue |
-
-## Tools: `bin/logbook`
-
-The issues are the source of truth; the scripts read them and generate the rest. Needs
-`python3` and an authenticated `gh`. Two commands do the work, and they touch different things.
-
-**Generate the issues for a recurring line of effort** (touches GitHub only, nothing in the repo):
-
-```
-bin/logbook schedule 9 --start 2026-10 --count 12        # or --until 2027-09
-```
-
-One sub-issue per period under #9, each on the board as Todo with its due date as Target date,
-labeled `recurrence`, with its record path in the body. Periods that already exist are skipped.
-
-**Write one period's report** (touches one file, on its own branch):
-
-```
-bin/logbook record 33            # 33 is October's sub-issue; or: bin/logbook record 9 --period 2026-10
-```
-
-This creates a branch from `origin/main` and writes the record file from #9's template with the
-header filled in. Write the report, delete the `unfilled` line, then:
-
-```
-bin/logbook submit               # commits, pushes, opens the PR with "Closes #33  Refs #9"
-```
-
-The check runs, you merge, #33 closes, and the board moves it to Done. A one-off issue works the
-same way: `bin/logbook record 7`, write, `bin/logbook submit`, and the PR says `Closes #7`.
-
-**Without the CLI:** open the issue, follow its record path, create the file on GitHub, and at the
-bottom of the editor choose "Create a new branch for this commit and start a pull request." Put
-the `Closes` line in the PR description. Same result.
-
-**Only the driver writes the record.** `schedule`, `record`, `submit`, and `template --set` refuse
-unless your GitHub account is an assignee of the issue (for a recurrence, of the sub-issue or its
-parent), and the PR check fails a PR whose author is not one. The Driver line in the body is
-prose; the assignee list is what GitHub can verify, so assign the driver before records start.
-Add a second assignee when someone needs to cover for the driver.
-
-Other commands:
-
-```
-bin/logbook doc <issue#> --set                   write the Doc path into a new issue's body
-bin/logbook template <issue#> [--set]            show or write the issue's ## Template block
-bin/logbook check                                lint the docs/ tree
-bin/logbook check --pr <PR#>                     what the workflow runs on every PR
-```
+| recurring issue | `/schedule <first> [<last>]` | one sub-issue per period |
+| one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
+| recurring issue | `/done <period>` | the same, for that period's sub-issue |
+| any issue | `/template` | copies the record template into the issue body to edit |
+| record PR | `/done` | the record is written: the bot checks it and merges it |
+| anywhere | `/help` | lists the commands |
 
 ### Templates live in the issues
 
-`docs/` holds data only. The form a record is generated from lives in the issue that owns it,
-as a fenced block under a `## Template` heading in the issue body. A record is rendered from,
-in order:
+`docs/` holds records only. The form a record is generated from lives in the issue that owns it,
+as a fenced block under a `## Template` heading in the issue body. A record is rendered from, in
+order:
 
-1. the `## Template` block in the issue's own body;
+1. the `## Template` block in the issue's own body (for a sub-issue, its parent's);
 2. the block in the issue named by a `**Template:** #N` line, so several lines of effort can
    share one form;
-3. the built-in default in `bin/logbook` for a recurring or a one-off issue.
+3. the built-in default for a recurring or a one-off issue.
 
-`bin/logbook template <issue#>` shows the effective template and where it came from.
-`bin/logbook template <issue#> --set` writes the built-in default into the issue as a `## Template`
-block; the driver then edits it there, and every later record follows it. A template is ordinary
-markdown with these fields: `{{title}}`, `{{parent}}`, `{{sub_issue}}`, `{{driver}}`, `{{period}}`,
-`{{date}}`, `{{issue}}`. Keep an `**Issue:** #{{sub_issue}}` line in it (or `#{{issue}}` for a
-one-off); the lint and the PR check rely on that line.
+Comment `/template` to copy the effective template into the issue, then edit it there; every
+record opened after that follows it. Fields: `{{title}}`, `{{parent}}`, `{{sub_issue}}`,
+`{{driver}}`, `{{period}}`, `{{date}}`, `{{issue}}`. Keep the `**Issue:** #{{sub_issue}}` line
+(or `#{{issue}}` for a one-off); the check relies on it.
 
-Every generated file carries an `unfilled` marker on its second line. Delete it when the record
-is written. `submit` refuses while it is there, and the PR check fails a PR that closes an issue
-whose record still carries it. That is what keeps a scaffold from ever closing an issue.
+### The check
 
-The `check` workflow runs on every pull request. A PR that says `Closes #NN` fails unless it
-adds the file at that issue's record path and that file no longer carries the `unfilled` line.
+The `check` workflow runs on every PR, and `main` only accepts a PR that passes it. A PR that
+says `Closes #NN` fails unless it adds that issue's record, the record is no longer the
+unwritten scaffold the bot generated, and it keeps its `**Issue:** #NN` line.
+
+## For maintainers
+
+`bin/logbook` is the bot: `.github/workflows/bot.yml` runs `logbook handle` on issue, comment,
+and merge events with the App's token. It needs `python3` (standard library only) and `gh`.
+The same work runs locally as yourself:
+
+```
+bin/logbook schedule <issue#> --start <period> (--count N | --until <period>)
+bin/logbook template <issue#> [--set [--from FILE]]
+bin/logbook doc <issue#> [--set]                 print or write an issue's record path
+bin/logbook check [--pr <PR#>]                   lint docs/; with --pr, what the check runs
+```
+
+One-time setup: the `logbook` GitHub App (Contents, Issues, Pull requests: read/write;
+Metadata: read; organization Projects: read/write), installed on this repo, with its ID in the
+repo variable `LOGBOOK_APP_ID` and its private key in the repo secret `LOGBOOK_APP_KEY`.
 
 ## Labels
 
@@ -138,10 +126,10 @@ adds the file at that issue's record path and that file no longer carries the `u
 - `partner:` the outside party that has to show up
 - `needs-scope` no definition of done yet; `needs-external-help`; `blocked`; `faculty-lecture`
   (the tool should be presented to faculty at a coaching seminar when it ships);
-  `recurrence` (one cycle of a recurring line, generated by `bin/logbook schedule`)
+  `recurrence` (one period of a recurring line, created by `/schedule`)
 
 ## Board fields
 
 - **Driver** who owns the line of effort
-- **Doc** the path under `docs/` where its documentation lives
+- **Doc** the path under `docs/` where its records live (the bot writes it)
 - **Priority**, **Target date** set by the driver and the lab lead

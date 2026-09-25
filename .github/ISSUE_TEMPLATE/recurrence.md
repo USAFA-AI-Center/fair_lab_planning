@@ -1,11 +1,12 @@
 ---
 name: Recurrence
-about: One cycle of a recurring line of effort (make it a sub-issue of the parent)
-title: "<parent title>: <YYYY-MM or YYYY-Qn>"
+about: One change to a standing responsibility (recurring lines get these from /schedule)
+title: "<parent title>: <YYYY-MM-DD or short name>"
+labels: recurrence
 ---
 
 **Parent:** #NN
-**Cycle:**
-**Record:** docs/Parent_Title_With_Underscores/<date>.md
+**Cycle:** <YYYY-MM-DD or short name>
+**Record:** `docs/Parent_Title_With_Underscores/<cycle>.md`
 
-The PR that adds the record says `Closes #<this issue>` and `Refs #NN`.
+When the work is done, comment `/done` here. The bot opens the record PR and replies with a link to write it.

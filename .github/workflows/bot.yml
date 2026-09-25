@@ -1,0 +1,41 @@
+name: logbook
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  # _target: runs main's code with the App credentials. It never checks out the PR branch.
+  pull_request_target:
+    types: [closed]
+
+concurrency:
+  group: logbook-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  bot:
+    # Skip the bot's own issue edits and comments, comments that are not commands, and
+    # comments from outside the org (the repo is public).
+    # A merged PR still counts when the bot merged it.
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged) ||
+      (github.event_name == 'issues' && github.event.sender.type != 'Bot') ||
+      (github.event_name == 'issue_comment' && github.event.comment.user.type != 'Bot' &&
+       startsWith(github.event.comment.body, '/') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.LOGBOOK_APP_ID }}
+          private-key: ${{ secrets.LOGBOOK_APP_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Handle the event
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LOGBOOK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 bin/logbook handle "$GITHUB_EVENT_NAME" "$GITHUB_EVENT_PATH"
