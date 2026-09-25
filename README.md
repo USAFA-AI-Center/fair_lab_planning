@@ -38,6 +38,7 @@ stays open. Each period is a sub-issue with its own record.
 6. Comment `/template`. The bot fills in the body.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every period's record is generated from it.
 8. Comment `/schedule 2026-10 2027-05`. The bot creates one sub-issue per period, each on the board with its due date. Re-run with a later end to extend.
+   The format depends on the cadence: see [Schedule formats](#schedule-formats).
 9. When a period's work is finished, comment `/done` on **that period's sub-issue**. The bot opens a PR and replies with an edit link.
 10. Click the edit link, replace the placeholder text, click **Commit changes**.
 11. Comment `/done` on the PR. The bot merges it. The sub-issue closes and the board marks it Done.
@@ -48,8 +49,6 @@ stays open. Each period is a sub-issue with its own record.
 
 Records: `docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/2026-10.md`, one per period,
 and `Closeout.md` at the end.
-
-Periods: `2026-W40`, `2026-10`, `2026-Q4`, `2026-fall` / `2027-spring`, `2026`.
 
 ## One-off task
 
@@ -89,6 +88,21 @@ discrete change (a rebuild, an incident, a move) is a sub-issue with its own rec
 
 Records: `docs/B200_Management/2026-09-25_GPU_rebuild.md`, one per change, and `Closeout.md` at
 the end.
+
+## Schedule formats
+
+`/schedule <first> <last>` creates every period from first to last, inclusive. Use the format for
+the issue's cadence. `/schedule <first>` alone creates one period.
+
+| Cadence | Period format | Example | Creates | Each period is due |
+|---|---|---|---|---|
+| `weekly` | `YYYY-Www` (ISO week) | `/schedule 2026-W40 2026-W52` | 13 sub-issues, Sep 28 2026 to Dec 27 2026 | Sunday |
+| `monthly` | `YYYY-MM` | `/schedule 2026-10 2027-05` | 8 sub-issues, Oct 2026 to May 2027 | last day of the month |
+| `quarterly` | `YYYY-Qn` | `/schedule 2026-Q4 2027-Q3` | 4 sub-issues | last day of the quarter |
+| `semester` | `YYYY-fall` or `YYYY-spring` | `/schedule 2026-fall 2028-spring` | 4 sub-issues | Dec 15 (fall), May 15 (spring) |
+| `annual` | `YYYY` | `/schedule 2026 2028` | 3 sub-issues | Dec 31 |
+
+A period in the wrong format is refused with an example of the right one.
 
 ## Commands
 
