@@ -8,37 +8,32 @@ This repository provides automations for creating/documenting tasks for the Falc
 
 Source of truth for all active tasks for the current year: [FAIR Lab Lines of Effort 2026](https://github.com/orgs/USAFA-AI-Center/projects/3).
 
-All work tracking will be contained within the `docs/` directory. 
+All work tracking in `docs/` directory. 
 
-## Pick your task
-
-1. [Recurring task](#recurring-task): repeats on a schedule, weekly to annual.
-2. [One-off task](#one-off-task): done once, then closed.
-3. [Standing task](#standing-task): an ongoing responsibility, recorded one change at a time.
+## Three Task Types
+1. [Recurring task](#recurring-task): repeats on a schedule. (weekly - annual)
+2. [One-off task](#one-off-task): done once, closed.
+3. [Standing task](#standing-task): an ongoing responsibility, append tasks to parent.
 
 ## How it works
 
-A bot, `fair-logbook`, runs everything from issue and PR comments. Never close an issue by hand.
-The bot closes it when it merges the issue's record into `docs/`. A record is the write-up of the
-finished work: a markdown file generated from the issue's template.
+`fair-logbook` runs everything from issue and PR comments. Never close an issue by hand.
+The bot closes it when it merges the issue's record into `docs/`. 
+
+A **record** is the write-up of the finished work: a markdown file generated from the issue's template.
 
 Only the issue's assignees can run commands. The assignee is the driver. On a sub-issue, the
 parent's assignees count too. To let someone cover for the driver, add them as a second assignee.
 
 ## Recurring task
-
-For work that repeats: `weekly`, `monthly`, `quarterly`, `semester`, `annual`. The parent issue
-stays open. Each period is a sub-issue with its own record.
-
 1. Open **New issue → Line of effort**.
-2. Set the title. It becomes the record folder, so settle it now.
+2. Set the title (becomes the filename). 
 3. Pick **Cadence** (`weekly` to `annual`).
-4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
-5. Click **Create**. The bot labels the issue, puts it on the board as Recurring, and comments the next steps.
-6. Comment `/template`. The bot fills in the body.
+4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, `status`.
+5. Click **Create**.
+6. Comment `/template`.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every period's record is generated from it.
-8. Comment `/schedule <start date> <how many>`, e.g. `/schedule 2026-10-01 8` for eight months from October. The bot creates one sub-issue per period, each on the board with its due date. Re-run to extend; existing periods are skipped.
-   Examples for every cadence: [Schedule formats](#schedule-formats).
+8. Comment `/schedule <start date> <how many>` [Schedule formats](#schedule-formats).
 9. When a period's work is finished, comment `/done` on **that period's sub-issue**. The bot opens a PR and replies with an edit link.
 10. Click the edit link, replace the placeholder text, click **Commit changes**.
 11. Comment `/done` on the PR. The bot merges it. The sub-issue closes and the board marks it Done.
@@ -50,41 +45,31 @@ stays open. Each period is a sub-issue with its own record.
 The bot keeps a **Sub-issues** list in the parent's body: each period, whether it is open or done,
 and a link to its record. Don't edit it; it is rewritten on every `/schedule` and every merge.
 
-Deleting the parent closes its open sub-issues as not planned, removes them from the board, and
-closes their open record PRs.
-
-Records: `docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/2026-10.md`, one per period,
+Records: `docs/example_reccurring_task_title/2026-10.md`, one per period,
 and `Closeout.md` at the end.
 
 ## One-off task
-
-For work done once: `once`. The issue closes when its record merges.
-
 1. Open **New issue → Line of effort**.
-2. Set the title. It becomes the record file name, so settle it now.
+2. Set the title (becomes the filename).
 3. Pick **Cadence** `once`.
 4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
-5. Click **Create**. The bot labels the issue, puts it on the board as Todo, and comments the next steps.
-6. Comment `/template`. The bot fills in the body.
+5. Click **Create**.
+6. Comment `/template`.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`.
 8. Do the work. If it turns up new work, comment `/followup <title>`, e.g. `/followup Add a dark-mode logo`. The bot files it as a new one-off issue and lists it under **Follow-ups** in this issue.
 9. When the work is finished, comment `/done` on the issue. The bot opens a PR and replies with an edit link. The record's **Follow-ups filed** section is already filled in.
 10. Click the edit link, replace the placeholder text, click **Commit changes**.
 11. Comment `/done` on the PR. The bot merges it. The issue closes and the board marks it Done.
 
-Record: `docs/Make_FAIR_Lab_logo.md`.
+Record: `docs/example_one_off_task_title.md`.
 
 ## Standing task
-
-For an ongoing responsibility with no schedule: `standing`. The parent issue stays open. Each
-discrete change (a rebuild, an incident, a move) is a sub-issue with its own record.
-
 1. Open **New issue → Line of effort**.
-2. Set the title. It becomes the record folder, so settle it now.
+2. Set the title (becomes the filename).
 3. Pick **Cadence** `standing`.
 4. Set the driver under **Assignees** in the sidebar. Add any other labels there if they apply: `kind:`, `area:`, `partner:`, status.
-5. Click **Create**. The bot labels the issue, puts it on the board as Recurring, and comments the next steps.
-6. Comment `/template`. The bot fills in the body.
+5. Click **Create**.
+6. Comment `/template`.
 7. Edit the body: **Notes**, **Done means**, and the record template under `## Template`. Every change's record is generated from it.
 8. When a change happens, comment `/change GPU rebuild` on the parent. The bot files the sub-issue.
 9. When the change is done, comment `/done` on **that sub-issue**. The bot opens a PR and replies with an edit link.
@@ -95,7 +80,7 @@ discrete change (a rebuild, an incident, a move) is a sub-issue with its own rec
 
 The bot keeps a **Sub-issues** list in the parent's body, rewritten on every `/change` and every merge.
 
-Records: `docs/B200_Management/2026-09-25_GPU_rebuild.md`, one per change, and `Closeout.md` at
+Records: `docs/example_standing_task/change_needed_for_standing_task.md`, one per change, and `Closeout.md` at
 the end.
 
 ## Schedule formats
@@ -139,7 +124,7 @@ Quarters are calendar quarters (Q1 is Jan to Mar). Semesters are fall (Jul to De
 | `kind:` | if it applies | sidebar | `admin`, `build`, `infra`, `integration`, `report`, `service` |
 | `area:` | if it applies | sidebar | `b200`, `drone`, `fair-llm`, `website` |
 | `partner:` | if it applies | sidebar | the outside party, e.g. `partner:afit` |
-| status | if it applies | sidebar | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` (present the tool at a coaching seminar when it ships) |
+| `status` | if it applies | sidebar | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` (present the tool at a coaching seminar when it ships) |
 | `recurrence` | | the bot | marks a sub-issue made by `/schedule` or `/change` |
 
 ## Templates
@@ -148,6 +133,9 @@ A record is generated from the `## Template` block in the issue body, added by `
 sub-issue uses its parent's. `**Template:** #N` in the body borrows another issue's template. With
 neither, the bot uses the default. A template holds only the sections you write. The bot adds the
 header (title, issue, driver, date) to every record, and the follow-ups to a one-off's.
+
+## DEVELOPER NOTE: 
+as we find repeated tasks, we can extend this default template, and add logic for the bot to invoke certain temlates for certain task `kind`.
 
 ## The check
 
