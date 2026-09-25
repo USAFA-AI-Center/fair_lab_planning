@@ -40,7 +40,7 @@ Open **New issue → Line of effort**.
 
 | Label | Required | Options |
 |---|---|---|
-| `cadence:` | yes, one | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual` |
+| `cadence:` | yes, one | `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`, `standing` |
 | `kind:` | yes, one | `admin`, `build`, `infra`, `integration`, `report`, `service` |
 | `area:` | if it applies | `b200`, `drone`, `fair-llm`, `website` |
 | `partner:` | if it applies | the outside party, e.g. `partner:afit` |
@@ -82,6 +82,18 @@ Records: `docs/Set_up_and_manage_monthly_Faculty_Coaching_Seminars/2026-10.md`, 
 
 Periods: `2026-W40`, `2026-10`, `2026-Q4`, `2026-fall` / `2027-spring`, `2026`.
 
+## Standing responsibilities (`cadence:standing`)
+
+The issue never closes. Each discrete change (a rebuild, an incident, a move) is a sub-issue with
+its own record.
+
+1. Write the issue.
+2. When a change happens, comment `/change GPU rebuild` on the issue. The bot files the sub-issue.
+3. When the change is done, comment `/done` on the sub-issue.
+4. Fill in the template on the PR, then comment `/done` on the PR.
+
+Records: `docs/B200_Management/2026-09-25_GPU_rebuild.md`, one per change.
+
 ## Commands
 
 | Where | Comment | Does |
@@ -89,6 +101,7 @@ Periods: `2026-W40`, `2026-10`, `2026-Q4`, `2026-fall` / `2027-spring`, `2026`.
 | recurring issue | `/schedule <first> [<last>]` | creates the sub-issues; re-run to extend |
 | one-off issue or sub-issue | `/done` | opens the record PR |
 | recurring issue | `/done <period>` | opens that period's record PR |
+| standing issue | `/change <short name>` | files one change as a sub-issue |
 | one-off or recurring issue | `/template` | copies the record template into the issue to edit |
 | record PR | `/done` | checks the record and merges it |
 | anywhere | `/help` | lists the commands |
@@ -122,12 +135,12 @@ Projects (read/write). Its ID is in the variable `LOGBOOK_APP_ID`, its key in th
 ## Labels
 
 - `kind:` type of work, exactly one
-- `cadence:` `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`
+- `cadence:` `once`, `weekly`, `monthly`, `quarterly`, `semester`, `annual`, `standing`
 - `area:` shared dependency: website, b200, fair-llm, drone
 - `partner:` outside party that has to show up
 - `needs-scope`, `needs-external-help`, `blocked`
 - `faculty-lecture` present the tool at a coaching seminar when it ships
-- `recurrence` one period of a recurring issue, made by `/schedule`
+- `recurrence` one period or change, made by `/schedule` or `/change`
 
 ## Board fields
 

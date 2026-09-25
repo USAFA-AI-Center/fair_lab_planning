@@ -12,6 +12,7 @@ People drive it with comments; the bot workflow runs `logbook handle`:
                           on a recurring issue: one sub-issue per period, each
                           on the board as Todo with its due date as Target date.
                           Existing periods are skipped, so re-running is safe.
+  /change <short name>    on a standing issue: file one change as a sub-issue
   /done [<period>]        on a one-off issue or a recurrence sub-issue, when the
                           work is finished: open the record PR from the issue's
                           template and reply with a link to write it
@@ -68,6 +69,7 @@ ROOT = pathlib.Path(os.environ.get("LOGBOOK_ROOT") or pathlib.Path(__file__).res
 TZ = zoneinfo.ZoneInfo("America/Denver")
 RECURRENCE_LABEL = "recurrence"
 RECURRING = ("weekly", "monthly", "quarterly", "semester", "annual")
+STANDING = "standing"
 MAX_PERIODS = 520
 SCAFFOLD_MSG = "logbook: scaffold record for #"
 CLOSES = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)")
@@ -221,7 +223,7 @@ def title_slug(title):
 
 
 def doc_path_for(iss):
-    living = iss["cadence"] in RECURRING or iss["cadence"] is None
+    living = iss["cadence"] in RECURRING + (STANDING,) or iss["cadence"] is None
     return f"docs/{title_slug(iss['title'])}" + ("/" if living else ".md")
 
 
@@ -230,13 +232,15 @@ def is_living(iss):
 
 
 def kind(iss):
-    """'sub' (a recurrence), 'recurring' (a parent), 'standing' (living, no cadence) or 'once'."""
+    """'sub' (a period or change), 'recurring', 'standing', 'once', or 'unset' (no cadence label)."""
     if iss["parent"] or RECURRENCE_LABEL in iss["labels"]:
         return "sub"
     if iss["cadence"] in RECURRING:
         return "recurring"
-    if iss["cadence"] is None:
+    if iss["cadence"] == STANDING:
         return "standing"
+    if iss["cadence"] is None:
+        return "unset"
     return "once"
 
 
@@ -421,27 +425,40 @@ def ensure_label():
            "--description", "One cycle of a recurring line of effort")
 
 
-def create_sub(parent, period):
-    cad = parent["cadence"]
-    due = due_date(cad, period)
-    record = f"{parent['doc']}{period}.md"
+def create_sub(parent, cycle, due=None, name=None):
+    """A sub-issue for one period (or, for a standing line, one change) of a parent."""
+    title = sub_title(parent, name or cycle)
     body = "\n".join([
         f"**Parent:** #{parent['number']}",
-        f"**Cycle:** {period}",
-        f"**Record:** `{record}`",
-        f"**Due:** {due.isoformat()}",
+        f"**Cycle:** {cycle}",
+        f"**Record:** `{parent['doc']}{cycle}.md`",
+    ] + ([f"**Due:** {due.isoformat()}"] if due else []) + [
         "",
-        "When this period's work is done, comment `/done` here. The bot opens the record PR "
+        "When this work is done, comment `/done` here. The bot opens the record PR "
         "and replies with a link to write it.",
     ])
     ensure_label()
-    url = gh("issue", "create", "-R", REPO, "--title", sub_title(parent, period),
+    url = gh("issue", "create", "-R", REPO, "--title", title,
              "--body", body, "--label", RECURRENCE_LABEL).strip()
     sub = json.loads(gh("issue", "view", url, "--json", "number,id,url"))
     gql(f'mutation {{ addSubIssue(input:{{issueId:"{parent["id"]}", subIssueId:"{sub["id"]}"}}) '
         f'{{ issue {{ id }} }} }}')
     set_board(url, "Todo", due)
-    return dict(sub, title=sub_title(parent, period), due=due)
+    return dict(sub, title=title, due=due)
+
+
+def file_change(iss, login, name):
+    """A sub-issue for one change to a standing line; returns (number, url, created)."""
+    if kind(iss) != "standing":
+        raise Refuse(f"#{iss['number']} is not a standing responsibility; `/change` needs the "
+                     f"`cadence:{STANDING}` label.")
+    require_owner(iss, login, "file a change for")
+    sync_doc(iss)
+    sub = find_sub(iss, name)
+    if sub:
+        return sub["number"], sub["url"], False
+    sub = create_sub(iss, f"{today().isoformat()}_{title_slug(name)}", name=name)
+    return sub["number"], sub["url"], True
 
 
 def schedule(iss, login, start, count=None, until=None):
@@ -457,7 +474,7 @@ def schedule(iss, login, start, count=None, until=None):
         if sub:
             rows.append((p, sub["number"], False, due_date(iss["cadence"], p)))
         else:
-            sub = create_sub(iss, p)
+            sub = create_sub(iss, p, due_date(iss["cadence"], p))
             rows.append((p, sub["number"], True, sub["due"]))
     return rows
 
@@ -533,8 +550,10 @@ def record_target(iss, period=None):
             raise Refuse(f"#{iss['number']} has no sub-issue for {period}. "
                          f"Comment `/schedule {period}` to create it.")
         return record_target(load_issue(sub["number"]))
-    raise Refuse(f"#{iss['number']} is a standing responsibility with no cadence. File a sub-issue "
-                 "for the change (the Recurrence template), then comment `/done` on that.")
+    if k == "standing":
+        raise Refuse(f"#{iss['number']} is a standing responsibility. Comment `/change <short name>` "
+                     "to file the change as a sub-issue, then comment `/done` on that.")
+    raise Refuse(f"#{iss['number']} has no `cadence:` label. Add one first.")
 
 
 def quote(path):
@@ -662,6 +681,7 @@ HELP = """\
 | recurring issue | `/schedule <first> [<last>]` | one sub-issue per period, e.g. `/schedule 2026-10 2027-05` |
 | one-off issue or sub-issue | `/done` | the work is finished: the bot opens the record PR and links it |
 | recurring issue | `/done <period>` | the same, for that period's sub-issue |
+| standing issue | `/change <short name>` | files one change as a sub-issue |
 | one-off or recurring issue | `/template` | copies the record template into the issue body to edit |
 | record PR | `/done` | the record is written: the bot checks it and merges it |
 | anywhere | `/help` | this list |
@@ -685,12 +705,29 @@ def welcome(iss):
                  "",
                  "1. When the work is done, comment `/done` here.",
                  "2. Write the record in the PR the bot opens, then comment `/done` on the PR."]
+    elif k == "standing":
+        lines = [f"This is a standing responsibility. Its records go in `{iss['doc']}`.",
+                 "",
+                 "1. For each discrete change, comment `/change <short name>`, e.g. `/change GPU rebuild`.",
+                 "2. When the change is done, comment `/done` on the sub-issue the bot files.",
+                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
     else:
-        lines = ["This is a standing responsibility with no `cadence:` label. Add one "
-                 "(`cadence:once`, `cadence:monthly`, ...) and the bot sets up its records."]
+        lines = ["This issue has no `cadence:` label. Add one (`cadence:once`, `cadence:monthly`, "
+                 f"`cadence:{STANDING}`, ...) and the bot sets up its records."]
     if not iss["assignees"]:
         lines += ["", "**Assign the driver first:** only an assignee can run these commands."]
-    return "\n".join(lines + ["", "Comment `/help` for every command."])
+    return "\n".join(lines + ["", "Comment `/help` for every command.", WELCOME_MARK.format(k)])
+
+
+WELCOME_MARK = "<!-- logbook:welcome:{} -->"
+
+
+def last_welcome(number):
+    """The issue kind the bot's latest welcome on this issue was written for, or None."""
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{REPO}/issues/{number}/comments?per_page=100"))
+    kinds = [m.group(1) for page in pages for c in page if c["user"]["type"] == "Bot"
+             for m in [re.search(r"<!-- logbook:welcome:(\w+) -->", c["body"] or "")] if m]
+    return kinds[-1] if kinds else None
 
 
 def reply(number, text):
@@ -714,11 +751,14 @@ def on_issue(action, payload):
     if action in ("labeled", "unlabeled") and not payload["label"]["name"].startswith("cadence:"):
         return
     changed = sync_doc(iss)
-    if action == "opened":
-        set_board(iss["url"], "Recurring" if kind(iss) == "recurring" else "Todo")
-        reply(iss["number"], welcome(iss))
-    elif changed:
-        reply(iss["number"], f"Record path is now `{changed}`.\n\n" + welcome(iss))
+    k = kind(iss)
+    # Post the steps once per kind: a cadence label added later changes what the issue needs.
+    prev = None if action == "opened" else last_welcome(iss["number"])
+    if k != prev:
+        set_board(iss["url"], "Recurring" if k in ("recurring", "standing") else "Todo")
+    if k != prev or changed:
+        note = f"Record path is now `{changed}`.\n\n" if changed and action != "opened" else ""
+        reply(iss["number"], note + welcome(iss))
 
 
 def issue_command(iss, login, cmd, args):
@@ -731,6 +771,12 @@ def issue_command(iss, login, cmd, args):
                           for p, n, c, d in rows)
         return ("| Period | Sub-issue | | Due |\n|---|---|---|---|\n" + table +
                 "\n\nWhen a period's work is done, comment `/done` on its sub-issue.")
+    if cmd == "/change":
+        if not args:
+            raise Refuse("Usage: `/change <short name>`, e.g. `/change GPU rebuild`.")
+        n, url, created = file_change(iss, login, " ".join(args))
+        return (f"{'Filed' if created else 'Already filed:'} #{n}. "
+                "When the change is done, comment `/done` there.")
     if cmd == "/done":
         require_owner(iss, login, "record")
         t = record_target(iss, args[0] if args else None)
