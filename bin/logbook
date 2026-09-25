@@ -511,19 +511,30 @@ def render(template, **fields):
     return text
 
 
+# What the Line of effort issue template puts in the body; /template replaces it.
+BLANK_BODY = "Leave this body blank. Create the issue, then comment `/template` and the bot fills it in."
+BODY_FIELDS = (("Notes", "_context, links_"), ("Doc", None),
+               ("Done means", "_what has to exist for this to be finished_"))
+
+
 def set_template(iss, login, source_text=None):
+    """Fill in the issue body: its fields, kept if already written, and the ## Template block."""
     require_owner(iss, login, "set the template of")
     sync_doc(iss)
     text = source_text or (DEFAULT_RECORD if is_living(iss) else DEFAULT_COMPLETION)
     fence = "````" if "```" in text else "```"
     block = f"## Template\n{fence}markdown\n{text.rstrip()}\n{fence}"
-    body = iss["body"]
-    if TEMPLATE_BLOCK.search(body):
-        body = TEMPLATE_BLOCK.sub(lambda m: block, body, count=1)
-        what = "replaced"
-    else:
-        body = body.rstrip() + "\n\n" + block + "\n"
-        what = "added"
+    what = "replaced" if TEMPLATE_BLOCK.search(iss["body"]) else "added"
+    rest = TEMPLATE_BLOCK.sub("", iss["body"].replace(BLANK_BODY, ""))
+    fields = []
+    for name, placeholder in BODY_FIELDS:
+        pat = re.compile(rf"^\*\*{name}:\*\*[ \t]*(.*)$", re.M)
+        m = pat.search(rest)
+        value = f"`{iss['doc']}`" if name == "Doc" else (m.group(1).strip() if m and m.group(1).strip() else placeholder)
+        fields.append(f"**{name}:** {value}")
+        rest = pat.sub("", rest)
+    rest = re.sub(r"\n{3,}", "\n\n", rest).strip()
+    body = "\n".join(fields) + ("\n\n" + rest if rest else "") + "\n\n" + block + "\n"
     gh("issue", "edit", str(iss["number"]), "-R", REPO, "--body", body)
     return what
 
@@ -705,12 +716,12 @@ def welcome(iss):
                  "",
                  f"1. Comment `/schedule {span[0]} {span[-1]}` to create one sub-issue per period.",
                  "2. When a period's work is done, comment `/done` on that sub-issue.",
-                 "3. Write the record in the PR the bot opens, then comment `/done` on the PR."]
+                 "3. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
     elif k == "once":
         lines = [f"This is a one-off. Its record goes in `{iss['doc']}`.",
                  "",
                  "1. When the work is done, comment `/done` here.",
-                 "2. Write the record in the PR the bot opens, then comment `/done` on the PR."]
+                 "2. Fill in the template on the PR the bot opens, then comment `/done` on the PR."]
     elif k == "standing":
         lines = [f"This is a standing responsibility. Its records go in `{iss['doc']}`.",
                  "",
@@ -720,6 +731,11 @@ def welcome(iss):
     else:
         lines = ["This issue has no `cadence:` label. Add one (`cadence:once`, `cadence:monthly`, "
                  f"`cadence:{STANDING}`, ...) and the bot sets up its records."]
+    if k in ("recurring", "once", "standing") and not iss["template_text"]:
+        steps = [l for l in lines if re.match(r"\d+\. ", l)]
+        lines = [l for l in lines if l not in steps] + [
+            "1. Comment `/template` to fill in this issue's body and its record template."] + [
+            re.sub(r"^\d+", str(i + 2), l) for i, l in enumerate(steps)]
     if not iss["assignees"]:
         lines += ["", "**Assign the driver first:** only an assignee can run these commands."]
     return "\n".join(lines + ["", "Comment `/help` for every command.", WELCOME_MARK.format(k)])
@@ -803,8 +819,9 @@ def issue_command(iss, login, cmd, args):
                      f"Comment `/template` on #{parent['number']} to add it.")
             raise Refuse("A sub-issue's records use its parent's template, so nothing is added here. " + where)
         what = set_template(iss, login)
-        return (f"## Template block {what} in this issue's body. Edit it there; "
-                "every record opened after that follows it.")
+        return (f"Filled in this issue's body, with the record template {what} under `## Template`. "
+                "Edit **Notes**, **Done means**, and the template there; every record opened after "
+                "that follows the template.")
     raise Refuse(f"`{cmd}` is not a command here.\n\n{HELP}")
 
 

@@ -30,7 +30,11 @@ them as a second assignee. `/help` works for anyone.
 
 ## Writing an issue
 
-Open **New issue → Line of effort**.
+1. Open **New issue → Line of effort**.
+2. Set the title, the assignee, and the labels. Leave the body as it is.
+3. Click **Create**.
+4. Comment `/template`. The bot fills in the body.
+5. Edit the body: **Notes**, **Done means**, and the record template under `## Template`.
 
 **Title.** The title becomes the record path. Settle it before the first record.
 
@@ -47,22 +51,12 @@ commands from anyone else.
 | `partner:` | if it applies | the outside party, e.g. `partner:afit` |
 | status | if it applies | `needs-scope`, `needs-external-help`, `blocked`, `faculty-lecture` |
 
-**Body.**
-
-```
-**Notes:** context, links
-**Doc:** _the bot fills this in_
-**Done means:** what has to exist for this to be finished
-```
-
-**Record template (optional).** Comment `/template` on the issue. The bot adds the default
-template to the issue body, required fields already in place. Edit its sections to fit the work.
-Every record for this issue is generated from it. Leave the `**Issue:**` line and the `{{...}}`
-fields as they are. Skip this and the bot uses the default.
+**Record template.** Every record for this issue is generated from the `## Template` block.
+Edit its sections to fit the work. Leave the `**Issue:**` line and the `{{...}}` fields as they are.
 
 ## One-off work (`cadence:once`)
 
-1. Write the issue.
+1. Write the issue and comment `/template` (see Writing an issue).
 2. When the work is finished, comment `/done` on the issue. The bot opens a PR and replies with an edit link.
 3. Fill in the template on the PR: click the edit link, replace the placeholder text, click **Commit changes**.
 4. Comment `/done` on the PR. The bot merges it, closes the issue, and marks it Done.
@@ -73,7 +67,7 @@ Record: `docs/Make_FAIR_Lab_logo.md` (the issue title, spaces as underscores).
 
 The parent issue never closes. Each period is a sub-issue with its own record.
 
-1. Write the parent issue.
+1. Write the parent issue and comment `/template` (see Writing an issue).
 2. Comment `/schedule 2026-10 2027-05` on the parent. The bot creates one sub-issue per period, with due dates on the board.
 3. When a period's work is finished, comment `/done` on its sub-issue.
 4. Fill in the template on the PR, then comment `/done` on the PR.
@@ -87,7 +81,7 @@ Periods: `2026-W40`, `2026-10`, `2026-Q4`, `2026-fall` / `2027-spring`, `2026`.
 The issue never closes. Each discrete change (a rebuild, an incident, a move) is a sub-issue with
 its own record.
 
-1. Write the issue.
+1. Write the issue and comment `/template` (see Writing an issue).
 2. When a change happens, comment `/change GPU rebuild` on the issue. The bot files the sub-issue.
 3. When the change is done, comment `/done` on the sub-issue.
 4. Fill in the template on the PR, then comment `/done` on the PR.
